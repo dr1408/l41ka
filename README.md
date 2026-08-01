@@ -7,6 +7,8 @@
 <p align="center">l41ka is an rpi firmware and iOS bootkit aimed at
 iOS security/low-level research, developed for the sake of learning more about these SOCs at a low level. </p>
 
+<p align="center"><img width="1327" height="803" alt="Screenshot 2026-07-31 at 9 45 10 PM" src="https://github.com/user-attachments/assets/5c1b65b2-0c81-4c39-811b-3d9df56d8d20" /></p>
+
 
 ---
 
