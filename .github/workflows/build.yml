@@ -1,0 +1,86 @@
+name: Build firmware
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ARM_TOOLCHAIN_ARCHIVE: arm-gnu-toolchain-15.2.rel1-darwin-arm64-arm-none-eabi.tar.xz
+  ARM_TOOLCHAIN_URL: https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-darwin-arm64-arm-none-eabi.tar.xz
+
+jobs:
+  build:
+    name: Build waveshare_rp2350_usb_a
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Cache toolchain archive
+        uses: actions/cache@v4
+        with:
+          path: vendor/downloads
+          key: arm-gnu-toolchain-macos-arm64-15.2.rel1
+
+      - name: Set up toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor/downloads
+          if [[ ! -f "vendor/downloads/$ARM_TOOLCHAIN_ARCHIVE" ]]; then
+              curl --fail --location --retry 3 \
+                  --output "vendor/downloads/$ARM_TOOLCHAIN_ARCHIVE" \
+                  "$ARM_TOOLCHAIN_URL"
+          fi
+
+          rm -rf vendor/toolchain
+          mkdir -p vendor/toolchain
+          tar -xJf "vendor/downloads/$ARM_TOOLCHAIN_ARCHIVE" \
+              --strip-components=1 -C vendor/toolchain
+
+          xcrun --sdk iphoneos --find clang
+          xcrun clang -O2 src/payloads/PongoOS/tools/vmacho.c -o vendor/vmacho
+          test -x vendor/toolchain/bin/arm-none-eabi-gcc
+
+          {
+              echo "PAYLOAD_CLANG=$(xcrun --find clang)"
+              echo "VMACHO=$GITHUB_WORKSPACE/vendor/vmacho"
+              echo "PONGO_MAKE=$(command -v make)"
+              echo "XXD=$(command -v xxd)"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DPICO_BOARD=waveshare_rp2350_usb_a \
+              "-DPICO_TOOLCHAIN_PATH=$GITHUB_WORKSPACE/vendor/toolchain" \
+              "-DL41KA_PAYLOAD_CLANG=$PAYLOAD_CLANG" \
+              "-DL41KA_PAYLOAD_VMACHO=$VMACHO" \
+              "-DL41KA_PAYLOAD_XXD=$XXD" \
+              "-DL41KA_PONGOOS_MAKE=$PONGO_MAKE"
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --parallel
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: l41ka-waveshare-rp2350-usb-a
+          path: build/l41ka.*
+          if-no-files-found: error
+          retention-days: 14

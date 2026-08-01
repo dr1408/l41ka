@@ -1,0 +1,34 @@
+#define PAGE_SIZE       (0x4000)
+#define L1_PAGE_SIZE    (0x2000000)
+
+#define SRAM_BASE   0x19C000000
+#define IO_BASE     0x200000000
+
+#define NEW_SP      0x19C01E000
+
+#define ROM_BASE    0x100000000
+#define ROM_WRITE_ALIAS    (ROM_BASE + 0x100000)
+#define ROM_NEW_PA  0x19C390000
+#define ROM_SIZE    0x30000
+
+#define BOOT_TRAMP_DST       0x19C018000
+#define BOOT_TRAMP_RW_ALIAS  (ROM_BASE + 0x200000)
+
+/// iBoot Patcher
+#define LOAD_TAIL_PA        0x19C384000
+#define LOAD_TAIL_RW_ALIAS  (ROM_BASE + 0x300000)
+
+#define TTBR_BASE       0x19C388000
+#define ROM_PTE_BASE    0x19C38C000
+
+#define TRAMP_OFF       -0x800
+#define HANDLER_OFF     -0x400
+
+#define LOAD_AREA_SIZE  0x354000
+
+#define BOOT_TRAMP      0x100007D00
+#define BOOT_TRAMP_REL  (BOOT_TRAMP - ROM_BASE)
+#define BOOT_TRAMP_LEN  0x400
+
+#define STRLCPY     0x1000116F4
+#define MEMCPY      0x100011770

@@ -1,0 +1,9 @@
+[submodule "src/payloads/PongoOS"]
+	path = src/payloads/PongoOS
+	url = git@github.com:0cyn/PongoOS.git
+[submodule "pico-sdk"]
+	path = vendor/pico-sdk
+	url = https://github.com/raspberrypi/pico-sdk
+[submodule "vendor/rapidjson"]
+	path = vendor/rapidjson
+	url = https://github.com/Tencent/rapidjson.git
