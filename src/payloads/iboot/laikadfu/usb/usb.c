@@ -4,6 +4,7 @@
 
 #include "ch9.h"
 #include "../laikadfu_offsets.h"
+#include "../diag.h"
 #include "synopsys.h"
 
 #pragma clang section text="__TEXT,__laikadfu"
@@ -114,12 +115,14 @@ void laikadfu_usb_enumerate(uintptr_t scratch)
 		uint8_t request_type = setup->raw.bmRequestType;
 		uint8_t request = setup->raw.bRequest;
 		uint16_t length = setup->raw.wLength;
+		laikadfu_diag_checkpoint(LAIKADFU_DIAG_SETUP_SEEN);
 
 		if ((request_type & USB_REQUEST_TYPE_DIRECTION(
 			USB_REQUEST_TYPE_DIRECTION_DEVICE2HOST)) != 0)
 		{
 			if (request == USB_REQUEST_GET_DESCRIPTOR)
 			{
+				laikadfu_diag_checkpoint(LAIKADFU_DIAG_DESCRIPTOR);
 				uint8_t descriptor_type = setup->get_descriptor.type;
 				if (descriptor_type == USB_DEVICE_DESCRIPTOR)
 					synopsys_ep0_send_data(scratch, &laikadfu_usb_device_descriptor,
@@ -153,6 +156,7 @@ void laikadfu_usb_enumerate(uintptr_t scratch)
 		}
 		else if (request == USB_REQUEST_SET_ADDRESS)
 		{
+			laikadfu_diag_checkpoint(LAIKADFU_DIAG_SET_ADDRESS);
 			synopsys_ep0_set_address(setup->set_address.address);
 			synopsys_ep0_send_status(scratch);
 		}

@@ -500,6 +500,13 @@ namespace control {
 				return;
 			submit_synchronous(TargetCommandType::IbootEmbeddedPatchfinder);
 			return;
+		case Opcode::DevicePwnedDfuSendEmbeddedIbootPatchfinderDiag:
+			if (header.payload_length != 8u)
+				return SendResponse(header, Status::InvalidPayload);
+			if (!require_pwned_dfu())
+				return;
+			submit_synchronous(TargetCommandType::IbootEmbeddedPatchfinderDiag);
+			return;
 		case Opcode::DevicePongoReadOutput:
 			if (!require_empty() || !require_device(DeviceType::Pongo))
 				return;

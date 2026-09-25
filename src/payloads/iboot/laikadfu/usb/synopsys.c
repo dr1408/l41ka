@@ -3,6 +3,7 @@
 #include "synopsys.h"
 
 #include "../laikadfu_offsets.h"
+#include "../diag.h"
 
 #pragma clang section text="__TEXT,__laikadfu"
 
@@ -97,6 +98,7 @@ static uint32_t clock_gate(uintptr_t reg, int enable)
 
 static void configure_usb_complex(void)
 {
+	laikadfu_diag_checkpoint(LAIKADFU_DIAG_PRE_COMPLEX);
 	clock_gate(gLaikaDFUOffsets.usb_clock0, 0);
 	clock_gate(gLaikaDFUOffsets.usb_clock1, 0);
 	clock_gate(gLaikaDFUOffsets.usb_clock2, 0);
@@ -123,6 +125,7 @@ static void configure_usb_complex(void)
 	write32(gLaikaDFUOffsets.usb_complex, 0x64,
 		read32(gLaikaDFUOffsets.usb_complex, 0x64) & ~2u);
 	delay_us(1500);
+	laikadfu_diag_checkpoint(LAIKADFU_DIAG_POST_COMPLEX);
 }
 
 static void dart_bypass_usb(uintptr_t base)
@@ -147,6 +150,7 @@ void synopsys_initialize(void)
 {
 	configure_usb_complex();
 	dart_bypass_usb(gLaikaDFUOffsets.dart_base);
+	laikadfu_diag_checkpoint(LAIKADFU_DIAG_POST_DART);
 
 	write32(gLaikaDFUOffsets.dwc2_base, GRSTCTL, 1);
 	uint32_t timeout = 0x100000u;
@@ -164,6 +168,7 @@ void synopsys_initialize(void)
 		timeout--;
 	if (timeout == 0)
 		laikadfu_fail(0xd002u);
+	laikadfu_diag_checkpoint(LAIKADFU_DIAG_POST_RESET);
 
 	write32(gLaikaDFUOffsets.dwc2_base, GAHBCFG, 0x2eu);
 	write32(gLaikaDFUOffsets.dwc2_base, GUSBCFG, 0x1408u);
@@ -180,6 +185,7 @@ void synopsys_initialize(void)
 		read32(gLaikaDFUOffsets.dwc2_base, DCTL) & ~2u);
 	write32(gLaikaDFUOffsets.usb_phy, 0,
 		read32(gLaikaDFUOffsets.usb_phy, 0) | 2u);
+	laikadfu_diag_checkpoint(LAIKADFU_DIAG_POST_CONNECT);
 
 	uint64_t deadline = laikadfu_counter() + LINK_TIMEOUT;
 	while ((read32(gLaikaDFUOffsets.dwc2_base, GINTSTS) & 0x1000u) == 0

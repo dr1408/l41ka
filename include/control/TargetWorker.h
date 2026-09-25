@@ -27,6 +27,7 @@ namespace control {
 		IbootBeginPatchfinder,
 		IbootTriggerPatchfinder,
 		IbootEmbeddedPatchfinder,
+		IbootEmbeddedPatchfinderDiag,
 		PongoReadOutput,
 		PongoSendCommand,
 		PongoSendAndTriggerEmbeddedKPF,

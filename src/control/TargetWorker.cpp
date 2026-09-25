@@ -17,6 +17,7 @@
 #include "pico/stdlib.h"
 #include "pico/util/queue.h"
 #include "payloads/iboot/laikadfu/laikadfu_offsets.h"
+#include "payloads/iboot/laikadfu/diag.h"
 #include "rom-patcher/iBootPatcherSetup.h"
 #include "usb/Device.h"
 #include "usb/libusb.h"
@@ -173,6 +174,34 @@ namespace control {
 			L41KA_LOG(logging::Level::Warn, "%s timeout last=%s connected=%lu", label, DeviceTypeName(last_type),
 				static_cast<unsigned long>(last_connected ? 1u : 0u));
 			return false;
+		}
+
+		void PassiveWaitForUsb(usb::Device& device, uint32_t timeout_ms, const char* label)
+		{
+			if (device.IsOpen())
+				device.Close();
+			PublishConnection(device);
+			L41KA_LOG(logging::Level::Info, "%s passive wait begin timeout=%lu", label,
+				static_cast<unsigned long>(timeout_ms));
+			const absolute_time_t started = get_absolute_time();
+			const absolute_time_t deadline = delayed_by_ms(started, timeout_ms);
+			bool last_connected = false;
+			bool first = true;
+			while (!time_reached(deadline))
+			{
+				const bool connected = usb::Device::IsConnected();
+				if (first || connected != last_connected)
+				{
+					const int64_t elapsed = absolute_time_diff_us(started, get_absolute_time()) / 1000;
+					L41KA_LOG(logging::Level::Info, "%s passive poll %lldms connected=%lu", label,
+						static_cast<long long>(elapsed), static_cast<unsigned long>(connected ? 1u : 0u));
+					first = false;
+					last_connected = connected;
+				}
+				sleep_ms(500);
+			}
+			L41KA_LOG(logging::Level::Info, "%s passive timeout connected=%lu", label,
+				static_cast<unsigned long>(last_connected ? 1u : 0u));
 		}
 
 		void PublishConnection(const usb::Device& device)
@@ -697,7 +726,7 @@ namespace control {
 			WaitForDevice(device, DeviceType::LaikaDfu, 30000, "wait-laikadfu");
 		}
 
-		void EmbeddedIboot(const TargetCommand& command, usb::Device& device)
+		void EmbeddedIbootWithMode(const TargetCommand& command, usb::Device& device, uint32_t diag_mode, bool active_wait)
 		{
 			if (!device.IsOpen() || !device.IsPwnedDFU())
 				PanicTarget(FaultReason::TargetStateChanged, command.request_id, command.opcode);
@@ -707,10 +736,11 @@ namespace control {
 			L41KA_LOG(logging::Level::Info,
 				"pwneddfu read-test addr=0x100000200 len=16 rc=%d bytes=%02x%02x%02x%02x",
 				sanity_rc, sanity[0], sanity[1], sanity[2], sanity[3]);
-			L41KA_LOG(logging::Level::Info, "setup-iboot embedded begin cpid=0x%lx payload=%lu",
+			L41KA_LOG(logging::Level::Info, "setup-iboot embedded begin cpid=0x%lx payload=%lu diag_mode=%lu active_wait=%lu",
 				static_cast<unsigned long>(device.AsPwnedDFU()->CPID()),
-				static_cast<unsigned long>(combined_stage2_payload_len));
-			int rc = iBootPatcherSetup::Run(*device.AsPwnedDFU());
+				static_cast<unsigned long>(combined_stage2_payload_len),
+				static_cast<unsigned long>(diag_mode), static_cast<unsigned long>(active_wait ? 1u : 0u));
+			int rc = iBootPatcherSetup::Run(*device.AsPwnedDFU(), diag_mode);
 			L41KA_LOG(logging::Level::Info, "setup-iboot embedded run rc=%d", rc);
 			if (rc == LIBUSB_SUCCESS)
 			{
@@ -723,7 +753,24 @@ namespace control {
 					static_cast<uint32_t>(rc));
 			device.Close();
 			PublishConnection(device);
-			WaitForDevice(device, DeviceType::LaikaDfu, 30000, "wait-laikadfu");
+			if (active_wait)
+				WaitForDevice(device, DeviceType::LaikaDfu, 30000, "wait-laikadfu");
+			else
+				PassiveWaitForUsb(device, 30000, "wait-laikadfu");
+		}
+
+		void EmbeddedIboot(const TargetCommand& command, usb::Device& device)
+		{
+			EmbeddedIbootWithMode(command, device, LAIKADFU_DIAG_NONE, true);
+		}
+
+		void EmbeddedIbootDiag(const TargetCommand& command, usb::Device& device)
+		{
+			if (command.length != 8u)
+				PanicTarget(FaultReason::Bug, command.request_id, command.opcode, command.length);
+			const uint32_t diag_mode = ReadU32(command.data);
+			const bool active_wait = ReadU32(command.data + 4) != 0;
+			EmbeddedIbootWithMode(command, device, diag_mode, active_wait);
 		}
 
 		void PongoSendCommand(const TargetCommand& command, usb::Device& device)
@@ -876,6 +923,9 @@ namespace control {
 					break;
 				case TargetCommandType::IbootEmbeddedPatchfinder:
 					EmbeddedIboot(command, device);
+					break;
+				case TargetCommandType::IbootEmbeddedPatchfinderDiag:
+					EmbeddedIbootDiag(command, device);
 					break;
 				case TargetCommandType::PongoReadOutput:
 					PongoReadOutput(command, device);

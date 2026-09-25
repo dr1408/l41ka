@@ -15,7 +15,7 @@ namespace usb {
 class iBootPatcherSetup
 {
 public:
-	static int Run(usb::PwnedDFUDevice& device);
+	static int Run(usb::PwnedDFUDevice& device, uint32_t diag_mode = 0);
 	static int RunUploaded(usb::PwnedDFUDevice& device, size_t payload_length);
 	static uint64_t UploadedPayloadAddress(const usb::PwnedDFUDevice& device);
 

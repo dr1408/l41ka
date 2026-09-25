@@ -440,6 +440,7 @@ l41ka_add_freestanding_payload(combined_stage2_payload _start
         ${L41KA_COMBINED_STAGE2_DIR}/laikadfu/ll.S
     DEPENDS
         ${L41KA_COMBINED_STAGE2_DIR}/laikadfu/laikadfu_offsets.h
+        ${L41KA_COMBINED_STAGE2_DIR}/laikadfu/diag.h
         ${L41KA_COMBINED_STAGE2_DIR}/laikadfu/usb/ch9.h
         ${L41KA_COMBINED_STAGE2_DIR}/laikadfu/usb/synopsys.h
         ${L41KA_COMBINED_STAGE2_DIR}/laikadfu/usb/usb.h

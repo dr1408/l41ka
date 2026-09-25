@@ -72,6 +72,7 @@ DEVICE_PWNED_DFU_EXECUTE = 0x02000003
 DEVICE_PWNED_DFU_SEND_IBOOT_PATCHFINDER = 0x03000001
 DEVICE_PWNED_DFU_TRIGGER_IBOOT_PATCHFINDER = 0x03000002
 DEVICE_PWNED_DFU_SEND_EMBEDDED_IBOOT_PATCHFINDER_AND_BOOT = 0x03000003
+DEVICE_PWNED_DFU_SEND_EMBEDDED_IBOOT_PATCHFINDER_DIAG = 0x03000004
 DEVICE_RECOVERY_REBOOT = 0x04000001
 DEVICE_RECOVERY_INFO = 0x04000002
 DEVICE_LAIKADFU_SEND_PAYLOAD = 0x05000001
@@ -480,6 +481,9 @@ def run_command(client: LaikaClient, args: argparse.Namespace, timeout_ms: int) 
         print_json({"registers": [f"0x{value:x}" for value in registers], "body": response[68:].hex()})
     elif command == "setup-iboot":
         client.request(DEVICE_PWNED_DFU_SEND_EMBEDDED_IBOOT_PATCHFINDER_AND_BOOT, timeout_ms=timeout_ms)
+    elif command == "setup-iboot-diag":
+        client.request(DEVICE_PWNED_DFU_SEND_EMBEDDED_IBOOT_PATCHFINDER_DIAG,
+                       struct.pack("<II", args.mode, 1 if args.active else 0), timeout_ms=timeout_ms)
     elif command == "iboot-patchfinder":
         stream_upload(client, args.path, DEVICE_PWNED_DFU_SEND_IBOOT_PATCHFINDER,
                       DEVICE_PWNED_DFU_TRIGGER_IBOOT_PATCHFINDER, 104, 16383, timeout_ms)
@@ -523,6 +527,9 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("errors", "info", "connection", "probe", "reset", "bootsel", "dfu-info", "recovery-info", "exploit",
                  "setup-iboot", "reboot", "load-pongo", "load-kpf", "load-ramdisk"):
         commands.add_parser(name)
+    diag = commands.add_parser("setup-iboot-diag")
+    diag.add_argument("mode", type=unsigned_integer, help="LaikaDFU checkpoint mode: 0 none, 1 entry, 2 pre-complex, 3 post-complex, 4 post-dart, 5 post-reset, 6 post-connect, 7 pre-ep0, 8 setup-seen, 9 set-address, 10 descriptor")
+    diag.add_argument("--active", action="store_true", help="actively enumerate after handoff; default is passive line-state wait")
     read = commands.add_parser("read")
     read.add_argument("address", type=unsigned_integer)
     read.add_argument("length", type=unsigned_integer)

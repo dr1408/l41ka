@@ -6,6 +6,7 @@
 #include <pf_aarch64.h>
 
 #include "payloads/iboot/laikadfu/laikadfu_offsets.h"
+#include "payloads/iboot/laikadfu/diag.h"
 #include "../payloads/shellcode/t8030/offsets.h"
 #include "control/Fault.h"
 #include "../../include/control/Log.h"
@@ -79,8 +80,20 @@ namespace {
 			static_cast<unsigned long long>(offsets.usb_complex_control));
 	}
 
+	size_t FindDiagOffset(const uint8_t* payload, size_t payload_length)
+	{
+		if (payload == nullptr || payload_length < sizeof(laikadfu_diag_config)) return SIZE_MAX;
+		for (size_t offset = 0; offset <= payload_length - sizeof(laikadfu_diag_config); offset += 8)
+		{
+			uint64_t magic = 0;
+			std::memcpy(&magic, payload + offset, sizeof(magic));
+			if (magic == LAIKADFU_DIAG_MAGIC) return offset;
+		}
+		return SIZE_MAX;
+	}
+
 	int PrepareStage2Payload(usb::PwnedDFUDevice& device, uint64_t target, const uint8_t* payload, size_t payload_length,
-		const laikadfu_offsets& offsets)
+		const laikadfu_offsets& offsets, uint32_t diag_mode)
 	{
 		L41KA_LOG(logging::Level::Info, "stage2 prepare target=0x%llx payload_len=%lu offsets_len=%lu",
 			static_cast<unsigned long long>(target), static_cast<unsigned long>(payload_length),
@@ -117,6 +130,22 @@ namespace {
 		}
 		const int offsets_rc = device.Write(target + offsets_offset, &offsets, sizeof(offsets));
 		if (offsets_rc != LIBUSB_SUCCESS) return offsets_rc;
+		if (diag_mode != LAIKADFU_DIAG_NONE)
+		{
+			const size_t diag_offset = payload != nullptr ? FindDiagOffset(payload, payload_length) : SIZE_MAX;
+			if (diag_offset == SIZE_MAX)
+			{
+				L41KA_LOG(logging::Level::Warn, "stage2 diag marker not found mode=%lu", static_cast<unsigned long>(diag_mode));
+				return LIBUSB_ERROR_NOT_FOUND;
+			}
+			laikadfu_diag_config diag { .magic = LAIKADFU_DIAG_MAGIC, .mode = diag_mode, .checkpoint = 0 };
+			L41KA_LOG(logging::Level::Info, "stage2 diag mode=%lu offset=0x%lx target=0x%llx",
+				static_cast<unsigned long>(diag_mode), static_cast<unsigned long>(diag_offset),
+				static_cast<unsigned long long>(target + diag_offset));
+			const int diag_rc = device.Write(target + diag_offset, &diag, sizeof(diag));
+			if (diag_rc != LIBUSB_SUCCESS) return diag_rc;
+		}
+
 		uint32_t readback = 0;
 		const int readback_rc = ReadRangeFnv(device, target, payload_length, &readback);
 		if (payload != nullptr)
@@ -135,7 +164,7 @@ namespace {
 		return readback_rc;
 	}
 
-	int T8020(usb::PwnedDFUDevice& device, const uint8_t* payload, size_t payload_length)
+	int T8020(usb::PwnedDFUDevice& device, const uint8_t* payload, size_t payload_length, uint32_t diag_mode)
 	{
 		constexpr uint64_t t8020_payload_pa = 0x19c388000ull;
 
@@ -155,7 +184,7 @@ namespace {
 			.dart_wait_for_tlb = 0,
 		};
 		LogOffsets("t8020", t8020_payload_pa, offsets);
-		int rc = PrepareStage2Payload(device, t8020_payload_pa, payload, payload_length, offsets);
+		int rc = PrepareStage2Payload(device, t8020_payload_pa, payload, payload_length, offsets, diag_mode);
 		if (rc != LIBUSB_SUCCESS) return rc;
 
 		// set up the super basic loop state and jump to 0x1000019f8
@@ -313,7 +342,7 @@ namespace {
 		return 0;
 	}
 
-	int T8030(usb::PwnedDFUDevice& device, const uint8_t* payload, size_t payload_length)
+	int T8030(usb::PwnedDFUDevice& device, const uint8_t* payload, size_t payload_length, uint32_t diag_mode)
 	{
 		constexpr uint64_t t8030_payload_pa = 0x19c384000ull;
 		const laikadfu_offsets offsets = {
@@ -332,7 +361,7 @@ namespace {
 			.dart_wait_for_tlb = 1,
 		};
 		LogOffsets("t8030", t8030_payload_pa, offsets);
-		int rc = PrepareStage2Payload(device, t8030_payload_pa, payload, payload_length, offsets);
+		int rc = PrepareStage2Payload(device, t8030_payload_pa, payload, payload_length, offsets, diag_mode);
 		if (rc != LIBUSB_SUCCESS) return rc;
 
 		const uint32_t nand_trampoline[] = {
@@ -415,32 +444,33 @@ namespace {
 		return device.SetBootLR(0x10002faa0ull);
 	}
 
-	int RunPayload(usb::PwnedDFUDevice& device, const uint8_t* payload, size_t payload_length)
+	int RunPayload(usb::PwnedDFUDevice& device, const uint8_t* payload, size_t payload_length, uint32_t diag_mode)
 	{
-		L41KA_LOG(logging::Level::Info, "setup-iboot dispatch cpid=0x%lx payload_len=%lu",
-			static_cast<unsigned long>(device.CPID()), static_cast<unsigned long>(payload_length));
+		L41KA_LOG(logging::Level::Info, "setup-iboot dispatch cpid=0x%lx payload_len=%lu diag_mode=%lu",
+			static_cast<unsigned long>(device.CPID()), static_cast<unsigned long>(payload_length),
+			static_cast<unsigned long>(diag_mode));
 		switch (device.CPID())
 		{
 		case 0x8020:
-			return T8020(device, payload, payload_length);
+			return T8020(device, payload, payload_length, diag_mode);
 		case 0x8030:
-			return T8030(device, payload, payload_length);
+			return T8030(device, payload, payload_length, diag_mode);
 		default:
 			return LIBUSB_ERROR_NOT_SUPPORTED;
 		}
 	}
 }  // namespace
 
-int iBootPatcherSetup::Run(usb::PwnedDFUDevice& device)
+int iBootPatcherSetup::Run(usb::PwnedDFUDevice& device, uint32_t diag_mode)
 {
 	static_assert(sizeof(combined_stage2_payload) == combined_stage2_payload_len);
-	return RunPayload(device, combined_stage2_payload, combined_stage2_payload_len);
+	return RunPayload(device, combined_stage2_payload, combined_stage2_payload_len, diag_mode);
 }
 
 int iBootPatcherSetup::RunUploaded(usb::PwnedDFUDevice& device, size_t payload_length)
 {
 	// since we have no heap, we pre-upload if we're using a user-supplied stage2
-	return RunPayload(device, nullptr, payload_length);
+	return RunPayload(device, nullptr, payload_length, LAIKADFU_DIAG_NONE);
 }
 
 uint64_t iBootPatcherSetup::UploadedPayloadAddress(const usb::PwnedDFUDevice& device)
