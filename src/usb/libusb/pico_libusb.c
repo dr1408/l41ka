@@ -67,8 +67,33 @@ typedef struct
 
 static libusb_context g_context;
 static libusb_device_handle g_handle;
+static pico_libusb_diag_t g_diag;
 static pio_usb_configuration_t g_configuration = PIO_USB_DEFAULT_CONFIG;
 static bool g_host_started;
+
+static uint16_t get_le16(const uint8_t* data);
+
+static void set_diag(libusb_context* ctx, uint32_t stage, int rc, const uint8_t* descriptor)
+{
+	g_diag.sequence++;
+	g_diag.connected = ctx != NULL && ctx->root != NULL && ctx->root->connected ? 1u : 0u;
+	g_diag.stage = stage;
+	g_diag.rc = rc;
+	g_diag.address = ctx != NULL && ctx->device != NULL ? ctx->device->address : 0u;
+	g_diag.max_packet0 = ctx != NULL ? ctx->max_packet0 : 0u;
+	g_diag.is_fullspeed = ctx != NULL && ctx->root != NULL && ctx->root->is_fullspeed ? 1u : 0u;
+	g_diag.vendor_id = 0;
+	g_diag.product_id = 0;
+	g_diag.descriptor_length = 0;
+	g_diag.descriptor_type = 0;
+	if (descriptor != NULL)
+	{
+		g_diag.descriptor_length = descriptor[0];
+		g_diag.descriptor_type = descriptor[1];
+		g_diag.vendor_id = get_le16(&descriptor[8]);
+		g_diag.product_id = get_le16(&descriptor[10]);
+	}
+}
 
 static uint16_t get_le16(const uint8_t* data)
 {
@@ -385,47 +410,60 @@ static int ensure_device_address(libusb_context* ctx)
 
 static int enumerate_device(libusb_context* ctx, uint8_t descriptor[USB_DEVICE_DESCRIPTOR_SIZE])
 {
+	set_diag(ctx, PICO_LIBUSB_DIAG_WAIT_CONNECTION, 0, NULL);
 	int rc = wait_for_connection(ctx);
 	if (rc < 0)
 	{
+		set_diag(ctx, PICO_LIBUSB_DIAG_WAIT_CONNECTION, rc, NULL);
 		return rc;
 	}
 
+	set_diag(ctx, PICO_LIBUSB_DIAG_RESET, 0, NULL);
 	rc = reset_bus_and_open_ep0(ctx, 8);
 	if (rc < 0)
 	{
+		set_diag(ctx, PICO_LIBUSB_DIAG_OPEN_EP0, rc, NULL);
 		return rc;
 	}
 
+	set_diag(ctx, PICO_LIBUSB_DIAG_SET_ADDRESS, 0, NULL);
 	rc = ensure_device_address(ctx);
 	if (rc < 0)
 	{
+		set_diag(ctx, PICO_LIBUSB_DIAG_SET_ADDRESS, rc, NULL);
 		return rc;
 	}
 
 	memset(descriptor, 0, USB_DEVICE_DESCRIPTOR_SIZE);
+	set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, 0, NULL);
 	const int transferred = read_device_descriptor(ctx, descriptor);
 	if (transferred < 0)
 	{
+		set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, transferred, descriptor);
 		return transferred;
 	}
 
 	if (transferred != USB_DEVICE_DESCRIPTOR_SIZE)
 	{
+		set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, LIBUSB_ERROR_IO, descriptor);
 		return LIBUSB_ERROR_IO;
 	}
 
+	set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, LIBUSB_SUCCESS, descriptor);
 	const uint8_t max_packet0 = descriptor[7] == 0u ? 8u : descriptor[7];
 	if (max_packet0 != ctx->max_packet0)
 	{
 		pio_usb_host_endpoint_close(PICO_LIBUSB_ROOT_INDEX, ctx->device->address, 0x00);
+		set_diag(ctx, PICO_LIBUSB_DIAG_REOPEN_EP0, 0, descriptor);
 		rc = open_ep0(ctx, max_packet0);
 		if (rc < 0)
 		{
+			set_diag(ctx, PICO_LIBUSB_DIAG_REOPEN_EP0, rc, descriptor);
 			return rc;
 		}
 	}
 
+	set_diag(ctx, PICO_LIBUSB_DIAG_DONE, LIBUSB_SUCCESS, descriptor);
 	return LIBUSB_SUCCESS;
 }
 
@@ -685,6 +723,17 @@ bool pico_libusb_device_connected(libusb_context* ctx)
 	}
 
 	return ensure_context(ctx) == LIBUSB_SUCCESS && ctx->root->connected;
+}
+
+int pico_libusb_get_diag(libusb_context* ctx, pico_libusb_diag_t* diag)
+{
+	(void)ctx;
+	if (diag == NULL)
+	{
+		return LIBUSB_ERROR_INVALID_PARAM;
+	}
+	*diag = g_diag;
+	return LIBUSB_SUCCESS;
 }
 
 int pico_libusb_get_connected_device_id(libusb_context* ctx, uint16_t* vendor_id, uint16_t* product_id)

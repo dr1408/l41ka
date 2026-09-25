@@ -166,9 +166,11 @@ namespace usb {
 				return LIBUSB_ERROR_INVALID_PARAM;
 			}
 
-			L41KA_LOG(logging::Level::Info, "pwneddfu write begin addr=0x%llx len=%u fnv=%08lx",
-				static_cast<unsigned long long>(chunk_address), static_cast<unsigned int>(chunk_size),
-				static_cast<unsigned long>(Fnv1a(input + offset, chunk_size)));
+			const bool verbose_write = chunk_size <= 128u || length <= 512u;
+			if (verbose_write)
+				L41KA_LOG(logging::Level::Info, "pwneddfu write begin addr=0x%llx len=%u fnv=%08lx",
+					static_cast<unsigned long long>(chunk_address), static_cast<unsigned int>(chunk_size),
+					static_cast<unsigned long>(Fnv1a(input + offset, chunk_size)));
 			uint8_t response[ControlMessageSize] = {0};
 			const int rc = ControlMessage(
 				MessageType::Write, chunk_address, input + offset, chunk_size, chunk_size, response, timeout_ms);
@@ -182,11 +184,12 @@ namespace usb {
 			uint8_t verify[ControlMessageBodySize] = {0};
 			const int verify_rc = ReadMemory(chunk_address, verify, chunk_size, timeout_ms);
 			const bool matches = verify_rc == LIBUSB_SUCCESS && std::memcmp(verify, input + offset, chunk_size) == 0;
-			L41KA_LOG(matches ? logging::Level::Info : logging::Level::Warn,
-				"pwneddfu write verify addr=0x%llx len=%u rc=%d match=%lu read_fnv=%08lx",
-				static_cast<unsigned long long>(chunk_address), static_cast<unsigned int>(chunk_size), verify_rc,
-				static_cast<unsigned long>(matches ? 1u : 0u),
-				static_cast<unsigned long>(verify_rc == LIBUSB_SUCCESS ? Fnv1a(verify, chunk_size) : 0u));
+			if (verbose_write || !matches)
+				L41KA_LOG(matches ? logging::Level::Info : logging::Level::Warn,
+					"pwneddfu write verify addr=0x%llx len=%u rc=%d match=%lu read_fnv=%08lx",
+					static_cast<unsigned long long>(chunk_address), static_cast<unsigned int>(chunk_size), verify_rc,
+					static_cast<unsigned long>(matches ? 1u : 0u),
+					static_cast<unsigned long>(verify_rc == LIBUSB_SUCCESS ? Fnv1a(verify, chunk_size) : 0u));
 			if (!matches)
 				return verify_rc == LIBUSB_SUCCESS ? LIBUSB_ERROR_IO : verify_rc;
 

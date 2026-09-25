@@ -44,6 +44,63 @@ namespace usb {
 			last_unexpected_vendor_id = 0xffff;
 			last_unexpected_product_id = 0xffff;
 		}
+
+		const char* LibusbErrorName(int rc)
+		{
+			switch (rc)
+			{
+			case LIBUSB_SUCCESS: return "SUCCESS";
+			case LIBUSB_ERROR_IO: return "IO";
+			case LIBUSB_ERROR_INVALID_PARAM: return "INVALID_PARAM";
+			case LIBUSB_ERROR_ACCESS: return "ACCESS";
+			case LIBUSB_ERROR_NO_DEVICE: return "NO_DEVICE";
+			case LIBUSB_ERROR_NOT_FOUND: return "NOT_FOUND";
+			case LIBUSB_ERROR_BUSY: return "BUSY";
+			case LIBUSB_ERROR_TIMEOUT: return "TIMEOUT";
+			case LIBUSB_ERROR_OVERFLOW: return "OVERFLOW";
+			case LIBUSB_ERROR_PIPE: return "PIPE";
+			case LIBUSB_ERROR_INTERRUPTED: return "INTERRUPTED";
+			case LIBUSB_ERROR_NO_MEM: return "NO_MEM";
+			case LIBUSB_ERROR_NOT_SUPPORTED: return "NOT_SUPPORTED";
+			case LIBUSB_ERROR_OTHER: return "OTHER";
+			default: return "UNKNOWN";
+			}
+		}
+
+		const char* DiagStageName(uint32_t stage)
+		{
+			switch (stage)
+			{
+			case PICO_LIBUSB_DIAG_WAIT_CONNECTION: return "wait-connection";
+			case PICO_LIBUSB_DIAG_RESET: return "reset";
+			case PICO_LIBUSB_DIAG_OPEN_EP0: return "open-ep0";
+			case PICO_LIBUSB_DIAG_SET_ADDRESS: return "set-address";
+			case PICO_LIBUSB_DIAG_READ_DESCRIPTOR: return "read-descriptor";
+			case PICO_LIBUSB_DIAG_REOPEN_EP0: return "reopen-ep0";
+			case PICO_LIBUSB_DIAG_DONE: return "done";
+			default: return "none";
+			}
+		}
+
+		void LogPicoUsbDiag(const char* prefix, int open_rc)
+		{
+			pico_libusb_diag_t diag {};
+			const int diag_rc = pico_libusb_get_diag(context, &diag);
+			if (diag_rc != LIBUSB_SUCCESS)
+			{
+				L41KA_LOG(logging::Level::Warn, "%s open rc=%d/%s diag_rc=%d/%s", prefix, open_rc,
+					LibusbErrorName(open_rc), diag_rc, LibusbErrorName(diag_rc));
+				return;
+			}
+			L41KA_LOG(logging::Level::Warn,
+				"%s open rc=%d/%s usbdiag seq=%lu stage=%s diag_rc=%ld/%s conn=%lu fs=%lu addr=%u mps=%u desc=%u/%u vid=%04x pid=%04x",
+				prefix, open_rc, LibusbErrorName(open_rc), static_cast<unsigned long>(diag.sequence),
+				DiagStageName(diag.stage), static_cast<long>(diag.rc), LibusbErrorName(diag.rc),
+				static_cast<unsigned long>(diag.connected), static_cast<unsigned long>(diag.is_fullspeed),
+				static_cast<unsigned int>(diag.address), static_cast<unsigned int>(diag.max_packet0),
+				static_cast<unsigned int>(diag.descriptor_length), static_cast<unsigned int>(diag.descriptor_type),
+				static_cast<unsigned int>(diag.vendor_id), static_cast<unsigned int>(diag.product_id));
+		}
 	}  // namespace
 
 	DeviceHandle::DeviceHandle(libusb_context* context, libusb_device_handle* handle) :
@@ -126,8 +183,11 @@ namespace usb {
 		const int open_rc = pico_libusb_open_device(context, &handle, &vendor_id, &product_id);
 		if (open_rc != LIBUSB_SUCCESS)
 		{
+			LogPicoUsbDiag("target open failed", open_rc);
 			return open_rc;
 		}
+		L41KA_LOG(logging::Level::Info, "target candidate vid=%04x pid=%04x",
+			static_cast<unsigned int>(vendor_id), static_cast<unsigned int>(product_id));
 		if (vendor_id != AppleVendorId
 			|| (product_id != DFUProductId && product_id != RecoveryProductId && product_id != PongoProductId
 				&& product_id != LaikaDFUProductId))
