@@ -13,6 +13,7 @@
 #include "hardware/structs/watchdog.h"
 #include "hardware/watchdog.h"
 #include "pico/stdlib.h"
+#include "tusb.h"
 
 namespace control {
 	namespace {
@@ -52,7 +53,6 @@ namespace control {
 			static_cast<unsigned long>(reason), static_cast<unsigned long>(request_id),
 			static_cast<unsigned long>(opcode), static_cast<unsigned long>(observed_value));
 
-		watchdog_enable(100, false);
 		watchdog_hw->scratch[0] = BreadcrumbMagic;
 		watchdog_hw->scratch[1] = BreadcrumbVersion;
 		watchdog_hw->scratch[2] = static_cast<uint32_t>(reason);
@@ -61,6 +61,14 @@ namespace control {
 		watchdog_hw->scratch[5] = 0;
 		watchdog_hw->scratch[6] = observed_value;
 		watchdog_hw->scratch[7] = to_ms_since_boot(get_absolute_time());
+		const absolute_time_t hold_deadline = make_timeout_time_ms(30000);
+		while (!time_reached(hold_deadline))
+		{
+			tud_task();
+			logging::Drain();
+			sleep_ms(1);
+		}
+		watchdog_enable(100, false);
 		panic("fatal target operation failure");
 		while (true)
 			tight_loop_contents();

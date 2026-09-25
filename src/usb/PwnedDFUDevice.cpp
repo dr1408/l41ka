@@ -5,6 +5,7 @@
 #include <cstring>
 #include <utility>
 
+#include "control/Log.h"
 #include "sys/unistd.h"
 #include "usb/libusb.h"
 
@@ -58,6 +59,15 @@ namespace usb {
 			*result = address + static_cast<uint64_t>(offset);
 			return true;
 		}
+
+		uint32_t Fnv1a(const void* data, size_t length)
+		{
+			const uint8_t* bytes = static_cast<const uint8_t*>(data);
+			uint32_t hash = 2166136261u;
+			for (size_t i = 0; i < length; ++i)
+				hash = (hash ^ bytes[i]) * 16777619u;
+			return hash;
+		}
 	}  // namespace
 
 	PwnedDFUDevice::PwnedDFUDevice(DFUDevice&& dfu) : DFUDevice(std::move(dfu)) {}
@@ -88,15 +98,21 @@ namespace usb {
 
 	int PwnedDFUDevice::SetBootLR(uint64_t target_lr, unsigned int timeout_ms)
 	{
+		L41KA_LOG(logging::Level::Info, "set-boot-lr submit lr=0x%llx", static_cast<unsigned long long>(target_lr));
 		uint8_t response[ControlMessageSize] = {0};
 		const int rc =
 			ControlMessage(MessageType::SetBootLR, target_lr, nullptr, 0, sizeof(uint64_t), response, timeout_ms);
 		if (rc != LIBUSB_SUCCESS)
 		{
+			L41KA_LOG(logging::Level::Warn, "set-boot-lr transport rc=%d", rc);
 			return rc;
 		}
 
-		return GetU64(response + ControlMessageHeaderSize) == 1u ? LIBUSB_SUCCESS : LIBUSB_ERROR_IO;
+		const uint64_t ack = GetU64(response + ControlMessageHeaderSize);
+		const int final_rc = ack == 1u ? LIBUSB_SUCCESS : LIBUSB_ERROR_IO;
+		L41KA_LOG(logging::Level::Info, "set-boot-lr returned ack=0x%llx rc=%d",
+			static_cast<unsigned long long>(ack), final_rc);
+		return final_rc;
 	}
 
 	int PwnedDFUDevice::ReadMemory(uint64_t address, void* data, size_t length, unsigned int timeout_ms)
@@ -150,13 +166,29 @@ namespace usb {
 				return LIBUSB_ERROR_INVALID_PARAM;
 			}
 
+			L41KA_LOG(logging::Level::Info, "pwneddfu write begin addr=0x%llx len=%u fnv=%08lx",
+				static_cast<unsigned long long>(chunk_address), static_cast<unsigned int>(chunk_size),
+				static_cast<unsigned long>(Fnv1a(input + offset, chunk_size)));
 			uint8_t response[ControlMessageSize] = {0};
 			const int rc = ControlMessage(
 				MessageType::Write, chunk_address, input + offset, chunk_size, chunk_size, response, timeout_ms);
 			if (rc != LIBUSB_SUCCESS)
 			{
+				L41KA_LOG(logging::Level::Warn, "pwneddfu write fail addr=0x%llx len=%u rc=%d",
+					static_cast<unsigned long long>(chunk_address), static_cast<unsigned int>(chunk_size), rc);
 				return rc;
 			}
+
+			uint8_t verify[ControlMessageBodySize] = {0};
+			const int verify_rc = ReadMemory(chunk_address, verify, chunk_size, timeout_ms);
+			const bool matches = verify_rc == LIBUSB_SUCCESS && std::memcmp(verify, input + offset, chunk_size) == 0;
+			L41KA_LOG(matches ? logging::Level::Info : logging::Level::Warn,
+				"pwneddfu write verify addr=0x%llx len=%u rc=%d match=%lu read_fnv=%08lx",
+				static_cast<unsigned long long>(chunk_address), static_cast<unsigned int>(chunk_size), verify_rc,
+				static_cast<unsigned long>(matches ? 1u : 0u),
+				static_cast<unsigned long>(verify_rc == LIBUSB_SUCCESS ? Fnv1a(verify, chunk_size) : 0u));
+			if (!matches)
+				return verify_rc == LIBUSB_SUCCESS ? LIBUSB_ERROR_IO : verify_rc;
 
 			offset += chunk_size;
 		}

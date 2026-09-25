@@ -6,6 +6,9 @@
 
 #include "control/Fault.h"
 #include "../../include/control/Log.h"
+#include "generated-payloads/combined_stage2_payload.h"
+#include "generated-payloads/pongo_payload.h"
+#include "generated-payloads/ramdisk_payload.h"
 #include "hardware/watchdog.h"
 #include "payloads/iboot/laikadfu/laikadfu_offsets.h"
 #include "pico/bootrom.h"
@@ -51,6 +54,12 @@ namespace control {
 	{
 		ActiveController = this;
 		logging::Init();
+		L41KA_LOG(logging::Level::Info,
+			"fw boot version=%s board=%s stage2_len=%lu pongo_len=%lu ramdisk_len=%lu",
+			FirmwareVersion, L41KA_BOARD_NAME,
+			static_cast<unsigned long>(combined_stage2_payload_len),
+			static_cast<unsigned long>(pongo_payload_len),
+			static_cast<unsigned long>(ramdisk_payload_len));
 		TargetWorkerInit();
 		const tusb_rhport_init_t device_init = {
 			.role = TUSB_ROLE_DEVICE,

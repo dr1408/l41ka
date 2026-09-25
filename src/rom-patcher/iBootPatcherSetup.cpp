@@ -18,9 +18,73 @@
 #include "usb/libusb.h"
 
 namespace {
+	uint32_t Fnv1aUpdate(uint32_t hash, const void* data, size_t length)
+	{
+		const uint8_t* bytes = static_cast<const uint8_t*>(data);
+		for (size_t i = 0; i < length; ++i)
+			hash = (hash ^ bytes[i]) * 16777619u;
+		return hash;
+	}
+
+	uint32_t Fnv1a(const void* data, size_t length)
+	{
+		return Fnv1aUpdate(2166136261u, data, length);
+	}
+
+	uint32_t ExpectedStage2Fnv(const uint8_t* payload, size_t payload_length, const laikadfu_offsets& offsets)
+	{
+		uint32_t hash = 2166136261u;
+		const size_t offsets_offset = payload_length - sizeof(laikadfu_offsets);
+		hash = Fnv1aUpdate(hash, payload, offsets_offset);
+		hash = Fnv1aUpdate(hash, &offsets, sizeof(offsets));
+		return hash;
+	}
+
+	int ReadRangeFnv(usb::PwnedDFUDevice& device, uint64_t address, size_t length, uint32_t* out)
+	{
+		if (out == nullptr) return LIBUSB_ERROR_INVALID_PARAM;
+		uint8_t buffer[256];
+		uint32_t hash = 2166136261u;
+		size_t offset = 0;
+		while (offset < length)
+		{
+			const size_t chunk = (length - offset) < sizeof(buffer) ? (length - offset) : sizeof(buffer);
+			const int rc = device.Read(address + offset, buffer, chunk);
+			if (rc != LIBUSB_SUCCESS) return rc;
+			hash = Fnv1aUpdate(hash, buffer, chunk);
+			offset += chunk;
+		}
+		*out = hash;
+		return LIBUSB_SUCCESS;
+	}
+
+	void LogOffsets(const char* soc, uint64_t payload_target, const laikadfu_offsets& offsets)
+	{
+		L41KA_LOG(logging::Level::Info,
+			"laikadfu offsets soc=%s payload=0x%llx magic=0x%llx sram=0x%llx dwc2=0x%llx dart=0x%llx",
+			soc, static_cast<unsigned long long>(payload_target), static_cast<unsigned long long>(offsets.magic),
+			static_cast<unsigned long long>(offsets.sram_base), static_cast<unsigned long long>(offsets.dwc2_base),
+			static_cast<unsigned long long>(offsets.dart_base));
+		L41KA_LOG(logging::Level::Info,
+			"laikadfu usb clocks c0=0x%llx c1=0x%llx c2=0x%llx complex=0x%llx phy=0x%llx phy_cfg0=0x%llx",
+			static_cast<unsigned long long>(offsets.usb_clock0),
+			static_cast<unsigned long long>(offsets.usb_clock1),
+			static_cast<unsigned long long>(offsets.usb_clock2),
+			static_cast<unsigned long long>(offsets.usb_complex),
+			static_cast<unsigned long long>(offsets.usb_phy),
+			static_cast<unsigned long long>(offsets.usb_phy_cfg0));
+		L41KA_LOG(logging::Level::Info, "laikadfu dart stream_mask=0x%llx wait=%llu complex_control=%llu",
+			static_cast<unsigned long long>(offsets.dart_tlb_stream_mask),
+			static_cast<unsigned long long>(offsets.dart_wait_for_tlb),
+			static_cast<unsigned long long>(offsets.usb_complex_control));
+	}
+
 	int PrepareStage2Payload(usb::PwnedDFUDevice& device, uint64_t target, const uint8_t* payload, size_t payload_length,
 		const laikadfu_offsets& offsets)
 	{
+		L41KA_LOG(logging::Level::Info, "stage2 prepare target=0x%llx payload_len=%lu offsets_len=%lu",
+			static_cast<unsigned long long>(target), static_cast<unsigned long>(payload_length),
+			static_cast<unsigned long>(sizeof(laikadfu_offsets)));
 		if (payload_length == 0u || payload_length >= PAGE_SIZE || payload_length < sizeof(laikadfu_offsets))
 			return LIBUSB_ERROR_NOT_SUPPORTED;
 
@@ -37,15 +101,38 @@ namespace {
 		}
 
 		// important! make sure we don't have linker problems.
+		L41KA_LOG(logging::Level::Info, "stage2 offsets marker found=0x%llx expected=0x%llx offset=0x%lx",
+			static_cast<unsigned long long>(offsets_magic), static_cast<unsigned long long>(LAIKADFU_OFFSETS_MAGIC),
+			static_cast<unsigned long>(offsets_offset));
 		if (offsets_magic != LAIKADFU_OFFSETS_MAGIC)
 			return LIBUSB_ERROR_OTHER;
 
 		if (payload != nullptr)
 		{
+			L41KA_LOG(logging::Level::Info, "stage2 payload write target=0x%llx len=%lu fnv=%08lx",
+				static_cast<unsigned long long>(target), static_cast<unsigned long>(payload_length),
+				static_cast<unsigned long>(Fnv1a(payload, payload_length)));
 			const int rc = device.Write(target, payload, payload_length);
 			if (rc != LIBUSB_SUCCESS) return rc;
 		}
-		return device.Write(target + offsets_offset, &offsets, sizeof(offsets));
+		const int offsets_rc = device.Write(target + offsets_offset, &offsets, sizeof(offsets));
+		if (offsets_rc != LIBUSB_SUCCESS) return offsets_rc;
+		uint32_t readback = 0;
+		const int readback_rc = ReadRangeFnv(device, target, payload_length, &readback);
+		if (payload != nullptr)
+		{
+			const uint32_t expected = ExpectedStage2Fnv(payload, payload_length, offsets);
+			L41KA_LOG(readback_rc == LIBUSB_SUCCESS && readback == expected ? logging::Level::Info : logging::Level::Warn,
+				"stage2 readback rc=%d expected_fnv=%08lx read_fnv=%08lx match=%lu", readback_rc,
+				static_cast<unsigned long>(expected), static_cast<unsigned long>(readback),
+				static_cast<unsigned long>(readback_rc == LIBUSB_SUCCESS && readback == expected ? 1u : 0u));
+		}
+		else
+		{
+			L41KA_LOG(logging::Level::Info, "stage2 uploaded readback rc=%d fnv=%08lx", readback_rc,
+				static_cast<unsigned long>(readback));
+		}
+		return readback_rc;
 	}
 
 	int T8020(usb::PwnedDFUDevice& device, const uint8_t* payload, size_t payload_length)
@@ -67,6 +154,7 @@ namespace {
 			.dart_tlb_stream_mask = 1,
 			.dart_wait_for_tlb = 0,
 		};
+		LogOffsets("t8020", t8020_payload_pa, offsets);
 		int rc = PrepareStage2Payload(device, t8020_payload_pa, payload, payload_length, offsets);
 		if (rc != LIBUSB_SUCCESS) return rc;
 
@@ -199,6 +287,7 @@ namespace {
 			return rc;
 		}
 
+		L41KA_LOG(logging::Level::Info, "setup-iboot handoff t8020 SetBootLR=0x100000000");
 		return device.SetBootLR(0x100000000);
 	}
 
@@ -242,6 +331,7 @@ namespace {
 			.dart_tlb_stream_mask = 0xf,
 			.dart_wait_for_tlb = 1,
 		};
+		LogOffsets("t8030", t8030_payload_pa, offsets);
 		int rc = PrepareStage2Payload(device, t8030_payload_pa, payload, payload_length, offsets);
 		if (rc != LIBUSB_SUCCESS) return rc;
 
@@ -321,11 +411,14 @@ namespace {
 			return rc;
 		}
 
+		L41KA_LOG(logging::Level::Info, "setup-iboot handoff t8030 SetBootLR=0x10002faa0");
 		return device.SetBootLR(0x10002faa0ull);
 	}
 
 	int RunPayload(usb::PwnedDFUDevice& device, const uint8_t* payload, size_t payload_length)
 	{
+		L41KA_LOG(logging::Level::Info, "setup-iboot dispatch cpid=0x%lx payload_len=%lu",
+			static_cast<unsigned long>(device.CPID()), static_cast<unsigned long>(payload_length));
 		switch (device.CPID())
 		{
 		case 0x8020:

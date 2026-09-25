@@ -11,8 +11,8 @@
 
 namespace logging {
 	namespace {
-		constexpr size_t MessageLength = 120;
-		constexpr size_t LineLength = 192;
+		constexpr size_t MessageLength = 160;
+		constexpr size_t LineLength = 240;
 		struct Record {
 			uint32_t uptime_ms;
 			uint32_t source_line;
@@ -50,7 +50,7 @@ namespace logging {
 
 	void Init()
 	{
-		queue_init(&Queue, sizeof(Record), 16);
+		queue_init(&Queue, sizeof(Record), 64);
 		Initialized = true;
 	}
 

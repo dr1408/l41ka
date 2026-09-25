@@ -4,6 +4,7 @@
 
 #include <utility>
 
+#include "control/Log.h"
 #include "usb/libusb.h"
 #include "usb/pico_libusb.h"
 
@@ -18,6 +19,8 @@ namespace usb {
 		libusb_context* context = nullptr;
 		bool initialized = false;
 		bool device_open = false;
+		uint16_t last_unexpected_vendor_id = 0xffff;
+		uint16_t last_unexpected_product_id = 0xffff;
 
 		int EnsureInitialized()
 		{
@@ -36,7 +39,11 @@ namespace usb {
 			return LIBUSB_SUCCESS;
 		}
 
-		void ResetUnexpectedDeviceLog() {}
+		void ResetUnexpectedDeviceLog()
+		{
+			last_unexpected_vendor_id = 0xffff;
+			last_unexpected_product_id = 0xffff;
+		}
 	}  // namespace
 
 	DeviceHandle::DeviceHandle(libusb_context* context, libusb_device_handle* handle) :
@@ -125,6 +132,13 @@ namespace usb {
 			|| (product_id != DFUProductId && product_id != RecoveryProductId && product_id != PongoProductId
 				&& product_id != LaikaDFUProductId))
 		{
+			if (vendor_id != last_unexpected_vendor_id || product_id != last_unexpected_product_id)
+			{
+				L41KA_LOG(logging::Level::Warn, "target unexpected vid=%04x pid=%04x",
+					static_cast<unsigned int>(vendor_id), static_cast<unsigned int>(product_id));
+				last_unexpected_vendor_id = vendor_id;
+				last_unexpected_product_id = product_id;
+			}
 			libusb_close(handle);
 			return LIBUSB_ERROR_NOT_FOUND;
 		}

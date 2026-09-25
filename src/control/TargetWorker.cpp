@@ -9,6 +9,7 @@
 #include "../../include/control/Log.h"
 #include "exploits/USBLiter8.h"
 #include "generated-payloads/checkra1n_kpf_payload.h"
+#include "generated-payloads/combined_stage2_payload.h"
 #include "generated-payloads/pongo_payload.h"
 #include "generated-payloads/ramdisk_payload.h"
 #include "pico/multicore.h"
@@ -112,6 +113,8 @@ namespace control {
 			return DeviceType::None;
 		}
 
+		void PublishConnection(const usb::Device& device);
+
 		const char* DeviceTypeName(DeviceType type)
 		{
 			switch (type)
@@ -123,6 +126,53 @@ namespace control {
 			case DeviceType::Pongo: return "pongo";
 			default: return "none";
 			}
+		}
+
+		bool WaitForDevice(usb::Device& device, DeviceType wanted, uint32_t timeout_ms, const char* label)
+		{
+			L41KA_LOG(logging::Level::Info, "%s wait begin timeout=%lu want=%s", label,
+				static_cast<unsigned long>(timeout_ms), DeviceTypeName(wanted));
+			const absolute_time_t started = get_absolute_time();
+			const absolute_time_t deadline = delayed_by_ms(started, timeout_ms);
+			DeviceType last_type = DeviceType::None;
+			bool last_connected = false;
+			bool first = true;
+			while (!time_reached(deadline))
+			{
+				if (device.IsOpen() && !usb::Device::IsConnected())
+					device.Close();
+
+				if (!device.IsOpen() && usb::Device::IsConnected())
+				{
+					const int open_rc = usb::Device::Open(&device);
+					if (open_rc != LIBUSB_SUCCESS && open_rc != LIBUSB_ERROR_NOT_FOUND)
+						L41KA_LOG(logging::Level::Warn, "%s open rc=%d", label, open_rc);
+				}
+
+				const bool connected = usb::Device::IsConnected();
+				const DeviceType type = GetDeviceType(device);
+				if (first || connected != last_connected || type != last_type)
+				{
+					const int64_t elapsed = absolute_time_diff_us(started, get_absolute_time()) / 1000;
+					L41KA_LOG(logging::Level::Info, "%s poll %lldms connected=%lu type=%s", label,
+						static_cast<long long>(elapsed), static_cast<unsigned long>(connected ? 1u : 0u),
+						DeviceTypeName(type));
+					first = false;
+					last_connected = connected;
+					last_type = type;
+				}
+				PublishConnection(device);
+				if (type == wanted)
+				{
+					const int64_t elapsed = absolute_time_diff_us(started, get_absolute_time()) / 1000;
+					L41KA_LOG(logging::Level::Info, "%s ok after=%lldms", label, static_cast<long long>(elapsed));
+					return true;
+				}
+				sleep_ms(500);
+			}
+			L41KA_LOG(logging::Level::Warn, "%s timeout last=%s connected=%lu", label, DeviceTypeName(last_type),
+				static_cast<unsigned long>(last_connected ? 1u : 0u));
+			return false;
 		}
 
 		void PublishConnection(const usb::Device& device)
@@ -222,6 +272,7 @@ namespace control {
 			device.Close();
 			PublishConnection(device);
 			L41KA_LOG(logging::Level::Info, "dfu exploit completed");
+			WaitForDevice(device, DeviceType::PwnedDfu, 15000, "wait-pwned-dfu");
 		}
 
 		void DfuRawEp0(const TargetCommand& command, usb::Device& device)
@@ -628,15 +679,22 @@ namespace control {
 			}
 			const uint32_t length = Upload.total;
 			SendStatus(command, Status::Success);
+			L41KA_LOG(logging::Level::Info, "setup-iboot uploaded begin len=%lu", static_cast<unsigned long>(length));
 			int rc = iBootPatcherSetup::RunUploaded(*device.AsPwnedDFU(), length);
+			L41KA_LOG(logging::Level::Info, "setup-iboot uploaded run rc=%d", rc);
 			if (rc == LIBUSB_SUCCESS)
+			{
+				L41KA_LOG(logging::Level::Info, "setup-iboot uploaded dfu-abort submit");
 				rc = device.AsPwnedDFU()->Abort();
+				L41KA_LOG(logging::Level::Info, "setup-iboot uploaded dfu-abort rc=%d", rc);
+			}
 			Upload = {};
 			if (rc != LIBUSB_SUCCESS)
 				PanicTarget(FaultReason::TargetUsbFailure, command.request_id, command.opcode,
 					static_cast<uint32_t>(rc));
 			device.Close();
 			PublishConnection(device);
+			WaitForDevice(device, DeviceType::LaikaDfu, 30000, "wait-laikadfu");
 		}
 
 		void EmbeddedIboot(const TargetCommand& command, usb::Device& device)
@@ -644,14 +702,28 @@ namespace control {
 			if (!device.IsOpen() || !device.IsPwnedDFU())
 				PanicTarget(FaultReason::TargetStateChanged, command.request_id, command.opcode);
 			SendStatus(command, Status::Success);
+			uint8_t sanity[16] {};
+			int sanity_rc = device.AsPwnedDFU()->Read(0x100000200ull, sanity, sizeof(sanity), 1000);
+			L41KA_LOG(logging::Level::Info,
+				"pwneddfu read-test addr=0x100000200 len=16 rc=%d bytes=%02x%02x%02x%02x",
+				sanity_rc, sanity[0], sanity[1], sanity[2], sanity[3]);
+			L41KA_LOG(logging::Level::Info, "setup-iboot embedded begin cpid=0x%lx payload=%lu",
+				static_cast<unsigned long>(device.AsPwnedDFU()->CPID()),
+				static_cast<unsigned long>(combined_stage2_payload_len));
 			int rc = iBootPatcherSetup::Run(*device.AsPwnedDFU());
+			L41KA_LOG(logging::Level::Info, "setup-iboot embedded run rc=%d", rc);
 			if (rc == LIBUSB_SUCCESS)
+			{
+				L41KA_LOG(logging::Level::Info, "setup-iboot embedded dfu-abort submit");
 				rc = device.AsPwnedDFU()->Abort();
+				L41KA_LOG(logging::Level::Info, "setup-iboot embedded dfu-abort rc=%d", rc);
+			}
 			if (rc != LIBUSB_SUCCESS)
 				PanicTarget(FaultReason::TargetUsbFailure, command.request_id, command.opcode,
 					static_cast<uint32_t>(rc));
 			device.Close();
 			PublishConnection(device);
+			WaitForDevice(device, DeviceType::LaikaDfu, 30000, "wait-laikadfu");
 		}
 
 		void PongoSendCommand(const TargetCommand& command, usb::Device& device)
