@@ -33,6 +33,8 @@ __attribute__((noreturn)) void laikadfu_main(
 {
 	laikadfu_diag_checkpoint(LAIKADFU_DIAG_ENTRY);
 	synopsys_initialize();
+	/* Prime EP0 before the host sends the first GET_DESCRIPTOR after reset. */
+	synopsys_ep0_prime_setup(scratch);
 	laikadfu_diag_checkpoint(LAIKADFU_DIAG_PRE_EP0);
 	laikadfu_usb_enumerate(scratch);
 	laikadfu_usb_receive(next_stage, boot_args, scratch);

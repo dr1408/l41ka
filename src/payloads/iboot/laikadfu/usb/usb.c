@@ -107,7 +107,7 @@ _Static_assert(sizeof(struct usb_device_qualifier_descriptor) == 10,
 
 void laikadfu_usb_enumerate(uintptr_t scratch)
 {
-	synopsys_ep0_wait_setup(scratch);
+	synopsys_ep0_wait_setup_primed(scratch);
 	for (;;)
 	{
 		volatile const union usb_setup_packet *setup =
