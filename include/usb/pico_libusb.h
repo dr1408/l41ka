@@ -33,6 +33,8 @@ enum {
     PICO_LIBUSB_DIAG_READ_DESCRIPTOR = 5,
     PICO_LIBUSB_DIAG_REOPEN_EP0 = 6,
     PICO_LIBUSB_DIAG_DONE = 7,
+    PICO_LIBUSB_DIAG_READ_DESCRIPTOR0 = 8,
+    PICO_LIBUSB_DIAG_SET_ADDRESS_RETRY = 9,
 };
 
 int pico_libusb_set_configuration(const pio_usb_configuration_t *configuration);

@@ -78,6 +78,8 @@ namespace usb {
 			case PICO_LIBUSB_DIAG_READ_DESCRIPTOR: return "read-descriptor";
 			case PICO_LIBUSB_DIAG_REOPEN_EP0: return "reopen-ep0";
 			case PICO_LIBUSB_DIAG_DONE: return "done";
+			case PICO_LIBUSB_DIAG_READ_DESCRIPTOR0: return "read-descriptor0";
+			case PICO_LIBUSB_DIAG_SET_ADDRESS_RETRY: return "set-address-retry";
 			default: return "none";
 			}
 		}
