@@ -45,6 +45,14 @@ _laikadfu_sync_instructions:
 _laikadfu_fail:
     mov w24, w0
 
+.globl _laikadfu_diag_crash
+_laikadfu_diag_crash:
+    mov w24, w0
+    brk #0x41
+1:
+    wfe
+    b 1b
+
 .globl _laikadfu_spin
 _laikadfu_spin:
     dsb sy

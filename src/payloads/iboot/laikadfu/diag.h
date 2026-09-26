@@ -17,6 +17,7 @@
 #define LAIKADFU_DIAG_SETUP_SEEN   8u
 #define LAIKADFU_DIAG_SET_ADDRESS  9u
 #define LAIKADFU_DIAG_DESCRIPTOR   10u
+#define LAIKADFU_DIAG_REBOOT_BASE 100u
 
 struct laikadfu_diag_config {
 	uint64_t magic;

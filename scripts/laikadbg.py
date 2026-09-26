@@ -482,8 +482,9 @@ def run_command(client: LaikaClient, args: argparse.Namespace, timeout_ms: int) 
     elif command == "setup-iboot":
         client.request(DEVICE_PWNED_DFU_SEND_EMBEDDED_IBOOT_PATCHFINDER_AND_BOOT, timeout_ms=timeout_ms)
     elif command == "setup-iboot-diag":
+        mode = args.mode + (100 if args.reboot else 0)
         client.request(DEVICE_PWNED_DFU_SEND_EMBEDDED_IBOOT_PATCHFINDER_DIAG,
-                       struct.pack("<II", args.mode, 1 if args.active else 0), timeout_ms=timeout_ms)
+                       struct.pack("<II", mode, 1 if args.active else 0), timeout_ms=timeout_ms)
     elif command == "iboot-patchfinder":
         stream_upload(client, args.path, DEVICE_PWNED_DFU_SEND_IBOOT_PATCHFINDER,
                       DEVICE_PWNED_DFU_TRIGGER_IBOOT_PATCHFINDER, 104, 16383, timeout_ms)
@@ -530,6 +531,7 @@ def build_parser() -> argparse.ArgumentParser:
     diag = commands.add_parser("setup-iboot-diag")
     diag.add_argument("mode", type=unsigned_integer, help="LaikaDFU checkpoint mode: 0 none, 1 entry, 2 pre-complex, 3 post-complex, 4 post-dart, 5 post-reset, 6 post-connect, 7 pre-ep0, 8 setup-seen, 9 set-address, 10 descriptor")
     diag.add_argument("--active", action="store_true", help="actively enumerate after handoff; default is passive line-state wait")
+    diag.add_argument("--reboot", action="store_true", help="target waits <mode> seconds at checkpoint, then faults/reboots for visible timing diagnosis")
     read = commands.add_parser("read")
     read.add_argument("address", type=unsigned_integer)
     read.add_argument("length", type=unsigned_integer)
