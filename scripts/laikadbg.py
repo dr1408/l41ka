@@ -73,6 +73,7 @@ DEVICE_PWNED_DFU_SEND_IBOOT_PATCHFINDER = 0x03000001
 DEVICE_PWNED_DFU_TRIGGER_IBOOT_PATCHFINDER = 0x03000002
 DEVICE_PWNED_DFU_SEND_EMBEDDED_IBOOT_PATCHFINDER_AND_BOOT = 0x03000003
 DEVICE_PWNED_DFU_SEND_EMBEDDED_IBOOT_PATCHFINDER_DIAG = 0x03000004
+DEVICE_PWNED_DFU_LAIKADFU_DRY_RUN = 0x03000005
 DEVICE_RECOVERY_REBOOT = 0x04000001
 DEVICE_RECOVERY_INFO = 0x04000002
 DEVICE_LAIKADFU_SEND_PAYLOAD = 0x05000001
@@ -283,6 +284,10 @@ def print_json(value: object) -> None:
     print(json.dumps(value, indent=2, sort_keys=True))
 
 
+def ctypes_signed_u32(value: int) -> int:
+    return value - 0x100000000 if value & 0x80000000 else value
+
+
 def connection_from_payload(payload: bytes) -> dict[str, object]:
     if len(payload) != 8:
         raise ProtocolError("connection response has wrong length")
@@ -485,6 +490,26 @@ def run_command(client: LaikaClient, args: argparse.Namespace, timeout_ms: int) 
         mode = args.mode + (100 if args.reboot else 0)
         client.request(DEVICE_PWNED_DFU_SEND_EMBEDDED_IBOOT_PATCHFINDER_DIAG,
                        struct.pack("<II", mode, 1 if args.active else 0), timeout_ms=timeout_ms)
+    elif command == "laikadfu-dry-run":
+        response = client.request(DEVICE_PWNED_DFU_LAIKADFU_DRY_RUN,
+                                  struct.pack("<II", args.cpid, args.stage), timeout_ms=timeout_ms)
+        if len(response) != 40:
+            raise ProtocolError("dry-run response has wrong length")
+        last_stage, rc, *snapshot = struct.unpack("<10I", response)
+        print_json({
+            "last_stage": last_stage,
+            "rc": ctypes_signed_u32(rc),
+            "snapshot": {
+                "clk0": f"0x{snapshot[0]:08x}",
+                "clk1": f"0x{snapshot[1]:08x}",
+                "clk2": f"0x{snapshot[2]:08x}",
+                "complex0": f"0x{snapshot[3]:08x}",
+                "phy0": f"0x{snapshot[4]:08x}",
+                "grstctl_or_last": f"0x{snapshot[5]:08x}",
+                "gintsts": f"0x{snapshot[6]:08x}",
+                "dctl": f"0x{snapshot[7]:08x}",
+            },
+        })
     elif command == "iboot-patchfinder":
         stream_upload(client, args.path, DEVICE_PWNED_DFU_SEND_IBOOT_PATCHFINDER,
                       DEVICE_PWNED_DFU_TRIGGER_IBOOT_PATCHFINDER, 104, 16383, timeout_ms)
@@ -532,6 +557,9 @@ def build_parser() -> argparse.ArgumentParser:
     diag.add_argument("mode", type=unsigned_integer, help="LaikaDFU checkpoint mode: 0 none, 1 entry, 2 pre-complex, 3 post-complex, 4 post-dart, 5 post-reset, 6 post-connect, 7 pre-ep0, 8 setup-seen, 9 set-address, 10 descriptor")
     diag.add_argument("--active", action="store_true", help="actively enumerate after handoff; default is passive line-state wait")
     diag.add_argument("--reboot", action="store_true", help="target waits <mode> seconds at checkpoint, then faults/reboots for visible timing diagnosis")
+    dry = commands.add_parser("laikadfu-dry-run", help="run LaikaDFU init stages through pwnedDFU MMIO and print CDC diagnostics without iBoot handoff")
+    dry.add_argument("--cpid", type=unsigned_integer, default=0, help="override CPID; 0 means use connected device CPID")
+    dry.add_argument("--stage", type=unsigned_integer, default=1, help="highest stage to run: 1 snapshot, 2 clock-off, 3 complex, 4 dart, 5 dwc2 reset, 6 connect")
     read = commands.add_parser("read")
     read.add_argument("address", type=unsigned_integer)
     read.add_argument("length", type=unsigned_integer)
@@ -576,6 +604,8 @@ def main() -> int:
         parser.error("read length must be positive")
     if args.command == "exec" and len(args.args) > 8:
         parser.error("exec accepts at most eight arguments")
+    if args.command == "laikadfu-dry-run" and args.stage > 6:
+        parser.error("laikadfu-dry-run --stage must be 0..6")
     if args.command == "dfu-raw":
         data = hex_data(args.data) if args.data else b""
         if len(data) > 64:

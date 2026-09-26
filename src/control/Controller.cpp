@@ -400,7 +400,7 @@ namespace control {
 		}
 		case Opcode::DevicePwnedDfuExecute:
 		{
-			if (header.payload_length != 80u)
+			if (header.payload_length < 80u || header.payload_length > 272u)
 				return SendResponse(header, Status::InvalidPayload);
 			const uint32_t flags = ReadU32(payload + 8);
 			const uint32_t argument_count = ReadU32(payload + 12);
@@ -506,6 +506,15 @@ namespace control {
 			if (!require_pwned_dfu())
 				return;
 			submit_synchronous(TargetCommandType::IbootEmbeddedPatchfinderDiag);
+			return;
+		case Opcode::DevicePwnedDfuLaikaDfuDryRun:
+			if (header.payload_length != 8u)
+				return SendResponse(header, Status::InvalidPayload);
+			if (ReadU32(payload + 4) > 6u)
+				return SendResponse(header, Status::InvalidPayload);
+			if (!require_pwned_dfu())
+				return;
+			submit_synchronous(TargetCommandType::LaikaDfuDryRun);
 			return;
 		case Opcode::DevicePongoReadOutput:
 			if (!require_empty() || !require_device(DeviceType::Pongo))
