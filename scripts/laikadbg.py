@@ -385,6 +385,27 @@ def print_hex_dump(address: int, data: bytes) -> None:
         print(f"{address + offset:016x}: {hexadecimal:<47}  {text}")
 
 
+
+
+def decode_laikadfu_diag(data: bytes) -> dict[str, object]:
+    if len(data) != 72:
+        raise ProtocolError("LaikaDFU diag mailbox has wrong length")
+    magic, mode, checkpoint, version, failed, last_op, last_error, counter, arg0, arg1, arg2, arg3 = struct.unpack("<Q6I5Q", data)
+    return {
+        "magic": f"0x{magic:016x}",
+        "mode": mode,
+        "checkpoint": checkpoint,
+        "version": version,
+        "failed": bool(failed),
+        "last_op": f"0x{last_op:08x}",
+        "last_error": f"0x{last_error:08x}",
+        "counter": f"0x{counter:x}",
+        "arg0": f"0x{arg0:x}",
+        "arg1": f"0x{arg1:x}",
+        "arg2": f"0x{arg2:x}",
+        "arg3": f"0x{arg3:x}",
+    }
+
 def read_memory(client: LaikaClient, address: int, length: int, timeout_ms: int) -> bytes:
     output = bytearray()
     while len(output) < length:
@@ -466,6 +487,8 @@ def run_command(client: LaikaClient, args: argparse.Namespace, timeout_ms: int) 
             Path(args.output).write_bytes(data)
         else:
             print_hex_dump(args.address, data)
+    elif command == "read-laikadfu-diag":
+        print_json(decode_laikadfu_diag(read_memory(client, args.address, 72, timeout_ms)))
     elif command == "write":
         write_memory(client, args.address, hex_data(args.data), timeout_ms)
     elif command == "exec":
@@ -536,6 +559,8 @@ def build_parser() -> argparse.ArgumentParser:
     read.add_argument("address", type=unsigned_integer)
     read.add_argument("length", type=unsigned_integer)
     read.add_argument("-o", "--output")
+    read_diag = commands.add_parser("read-laikadfu-diag")
+    read_diag.add_argument("address", type=unsigned_integer, help="physical address printed as stage2 diag target")
     write = commands.add_parser("write")
     write.add_argument("address", type=unsigned_integer)
     write.add_argument("data", help="hex bytes, or @file")

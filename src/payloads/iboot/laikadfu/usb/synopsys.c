@@ -83,17 +83,32 @@ static void delay_us(uint32_t microseconds)
 
 static uint32_t clock_gate(uintptr_t reg, int enable)
 {
-	uint32_t value = read32(reg, 0);
-	value = enable ? value | 0x0fu : (value & ~0x0fu) | 4u;
+	uint32_t before = read32(reg, 0);
+	uint32_t value = enable ? before | 0x0fu : (before & ~0x0fu) | 4u;
 	write32(reg, 0, value);
 
-	for (uint32_t timeout = 0x100000u; timeout != 0; timeout--)
+	uint32_t timeout = 0x100000u;
+	for (; timeout != 0; timeout--)
 	{
 		value = read32(reg, 0);
 		if ((value & 0x0fu) == ((value >> 4) & 0x0fu))
 			break;
 	}
+	laikadfu_diag_record(LAIKADFU_DIAG_OP_CLOCK, timeout == 0 ? 1u : 0u,
+		reg, (uint32_t)enable, before, value);
 	return value;
+}
+
+static void laikadfu_diag_write32(uintptr_t base, uint32_t offset, uint32_t value)
+{
+	write32(base, offset, value);
+	laikadfu_diag_record(LAIKADFU_DIAG_OP_WRITE32, 0, base, offset, value, read32(base, offset));
+}
+
+static void laikadfu_diag_fail_and_halt(uint32_t code, uintptr_t base, uint32_t offset, uint32_t value)
+{
+	laikadfu_diag_fail_record(code, base, offset, value);
+	laikadfu_fail(code);
 }
 
 static void configure_usb_complex(void)
@@ -107,12 +122,12 @@ static void configure_usb_complex(void)
 	clock_gate(gLaikaDFUOffsets.usb_clock1, 1);
 	clock_gate(gLaikaDFUOffsets.usb_clock2, 1);
 
-	write32(gLaikaDFUOffsets.usb_complex, 0,
+	laikadfu_diag_write32(gLaikaDFUOffsets.usb_complex, 0,
 		(uint32_t)gLaikaDFUOffsets.usb_complex_control);
-	write32(gLaikaDFUOffsets.usb_complex, 0x48, 0x03000088u);
-	write32(gLaikaDFUOffsets.usb_complex, 0x68,
+	laikadfu_diag_write32(gLaikaDFUOffsets.usb_complex, 0x48, 0x03000088u);
+	laikadfu_diag_write32(gLaikaDFUOffsets.usb_complex, 0x68,
 		(uint32_t)gLaikaDFUOffsets.usb_phy_cfg0);
-	write32(gLaikaDFUOffsets.usb_complex, 0x6c, 0x00020c44u);
+	laikadfu_diag_write32(gLaikaDFUOffsets.usb_complex, 0x6c, 0x00020c44u);
 	write32(gLaikaDFUOffsets.usb_complex, 0x60,
 		read32(gLaikaDFUOffsets.usb_complex, 0x60) | 1u);
 	delay_us(20);
@@ -125,6 +140,8 @@ static void configure_usb_complex(void)
 	write32(gLaikaDFUOffsets.usb_complex, 0x64,
 		read32(gLaikaDFUOffsets.usb_complex, 0x64) & ~2u);
 	delay_us(1500);
+	laikadfu_diag_record(LAIKADFU_DIAG_OP_READ32, 0, gLaikaDFUOffsets.usb_complex, 0x60,
+		read32(gLaikaDFUOffsets.usb_complex, 0x60), read32(gLaikaDFUOffsets.usb_phy, 0));
 	laikadfu_diag_checkpoint(LAIKADFU_DIAG_POST_COMPLEX);
 }
 
@@ -144,6 +161,7 @@ static void dart_bypass_usb(uintptr_t base)
 	write32(base, 0x40, read32(base, 0x40));
 	uint32_t tcr = read32(base, 0x100);
 	write32(base, 0x100, (tcr & 0xff00fe7fu) | 0x00010100u);
+	laikadfu_diag_record(LAIKADFU_DIAG_OP_READ32, 0, base, 0x100, tcr, read32(base, 0x100));
 }
 
 void synopsys_initialize(void)
@@ -158,7 +176,8 @@ void synopsys_initialize(void)
 		(read32(gLaikaDFUOffsets.dwc2_base, GRSTCTL) & 1u) != 0)
 		timeout--;
 	if (timeout == 0)
-		laikadfu_fail(0xd001u);
+		laikadfu_diag_fail_and_halt(0xd001u, gLaikaDFUOffsets.dwc2_base, GRSTCTL,
+			read32(gLaikaDFUOffsets.dwc2_base, GRSTCTL));
 
 	write32(gLaikaDFUOffsets.dwc2_base, DCTL,
 		read32(gLaikaDFUOffsets.dwc2_base, DCTL) | 2u);
@@ -167,7 +186,10 @@ void synopsys_initialize(void)
 		(read32(gLaikaDFUOffsets.dwc2_base, GRSTCTL) & 0x80000000u) == 0)
 		timeout--;
 	if (timeout == 0)
-		laikadfu_fail(0xd002u);
+		laikadfu_diag_fail_and_halt(0xd002u, gLaikaDFUOffsets.dwc2_base, GRSTCTL,
+			read32(gLaikaDFUOffsets.dwc2_base, GRSTCTL));
+	laikadfu_diag_record(LAIKADFU_DIAG_OP_READ32, 0, gLaikaDFUOffsets.dwc2_base, GRSTCTL,
+		read32(gLaikaDFUOffsets.dwc2_base, GRSTCTL), read32(gLaikaDFUOffsets.dwc2_base, DCTL));
 	laikadfu_diag_checkpoint(LAIKADFU_DIAG_POST_RESET);
 
 	write32(gLaikaDFUOffsets.dwc2_base, GAHBCFG, 0x2eu);
@@ -185,6 +207,8 @@ void synopsys_initialize(void)
 		read32(gLaikaDFUOffsets.dwc2_base, DCTL) & ~2u);
 	write32(gLaikaDFUOffsets.usb_phy, 0,
 		read32(gLaikaDFUOffsets.usb_phy, 0) | 2u);
+	laikadfu_diag_record(LAIKADFU_DIAG_OP_READ32, 0, gLaikaDFUOffsets.dwc2_base, GINTSTS,
+		read32(gLaikaDFUOffsets.dwc2_base, GINTSTS), read32(gLaikaDFUOffsets.dwc2_base, DCTL));
 	laikadfu_diag_checkpoint(LAIKADFU_DIAG_POST_CONNECT);
 
 	uint64_t deadline = laikadfu_counter() + LINK_TIMEOUT;
@@ -192,7 +216,8 @@ void synopsys_initialize(void)
 		&& laikadfu_counter() < deadline)
 		;
 	if ((read32(gLaikaDFUOffsets.dwc2_base, GINTSTS) & 0x1000u) == 0)
-		laikadfu_fail(0xd003u);
+		laikadfu_diag_fail_and_halt(0xd003u, gLaikaDFUOffsets.dwc2_base, GINTSTS,
+			read32(gLaikaDFUOffsets.dwc2_base, GINTSTS));
 
 	write32(gLaikaDFUOffsets.dwc2_base, GINTSTS, 0x1000u);
 	write32(gLaikaDFUOffsets.dwc2_base, DCFG,

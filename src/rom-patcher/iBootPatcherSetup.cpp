@@ -138,10 +138,16 @@ namespace {
 				L41KA_LOG(logging::Level::Warn, "stage2 diag marker not found mode=%lu", static_cast<unsigned long>(diag_mode));
 				return LIBUSB_ERROR_NOT_FOUND;
 			}
-			laikadfu_diag_config diag { .magic = LAIKADFU_DIAG_MAGIC, .mode = diag_mode, .checkpoint = 0 };
-			L41KA_LOG(logging::Level::Info, "stage2 diag mode=%lu offset=0x%lx target=0x%llx",
+			laikadfu_diag_config diag {
+				.magic = LAIKADFU_DIAG_MAGIC,
+				.mode = diag_mode,
+				.checkpoint = 0,
+				.version = LAIKADFU_DIAG_CONFIG_VERSION,
+			};
+			L41KA_LOG(logging::Level::Info, "stage2 diag mode=%lu offset=0x%lx target=0x%llx size=%lu",
 				static_cast<unsigned long>(diag_mode), static_cast<unsigned long>(diag_offset),
-				static_cast<unsigned long long>(target + diag_offset));
+				static_cast<unsigned long long>(target + diag_offset),
+				static_cast<unsigned long>(sizeof(diag)));
 			const int diag_rc = device.Write(target + diag_offset, &diag, sizeof(diag));
 			if (diag_rc != LIBUSB_SUCCESS) return diag_rc;
 		}
