@@ -28,7 +28,6 @@ namespace control {
 		IbootTriggerPatchfinder,
 		IbootEmbeddedPatchfinder,
 		IbootEmbeddedPatchfinderDiag,
-		LaikaDfuDryRun,
 		PongoReadOutput,
 		PongoSendCommand,
 		PongoSendAndTriggerEmbeddedKPF,

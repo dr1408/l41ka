@@ -62,7 +62,6 @@ namespace control {
 		DevicePwnedDfuTriggerIbootPatchfinder = 0x03000002,
 		DevicePwnedDfuSendEmbeddedIbootPatchfinderAndBoot = 0x03000003,
 		DevicePwnedDfuSendEmbeddedIbootPatchfinderDiag = 0x03000004,
-		DevicePwnedDfuLaikaDfuDryRun = 0x03000005,
 
 		DeviceRecoveryReboot = 0x04000001,
 		DeviceRecoveryInfo = 0x04000002,
