@@ -512,7 +512,11 @@ namespace control {
 			LaikaDfuDryRunOffsets offsets {};
 			if (!LaikaDfuDryRunGetOffsets(cpid == 0u ? pwned.CPID() : cpid, &offsets))
 			{
-				SendStatus(command, Status::InvalidPayload);
+				TargetResult result {};
+				result.generation = command.generation;
+				result.request_id = command.request_id;
+				result.status = Status::InvalidPayload;
+				queue_add_blocking(&ResultQueue, &result);
 				return;
 			}
 
