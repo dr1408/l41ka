@@ -30,15 +30,7 @@
 #endif
 
 #ifndef PICO_LIBUSB_RESET_SETTLE_MS
-	#define PICO_LIBUSB_RESET_SETTLE_MS 100u
-#endif
-
-#ifndef PICO_LIBUSB_ADDRESS_SETTLE_MS
-	#define PICO_LIBUSB_ADDRESS_SETTLE_MS 10u
-#endif
-
-#ifndef PICO_LIBUSB_SET_ADDRESS_RETRY_DELAY_MS
-	#define PICO_LIBUSB_SET_ADDRESS_RETRY_DELAY_MS 25u
+	#define PICO_LIBUSB_RESET_SETTLE_MS 50u
 #endif
 
 #define PICO_LIBUSB_ROOT_INDEX                        0u
@@ -377,15 +369,11 @@ static int control_transfer(libusb_context* ctx, uint8_t bmRequestType, uint8_t 
 	return (int)transferred;
 }
 
-static int read_device_descriptor_length(libusb_context* ctx, uint8_t* descriptor, uint16_t length)
-{
-	return control_transfer(ctx, LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_STANDARD | LIBUSB_RECIPIENT_DEVICE,
-		LIBUSB_REQUEST_GET_DESCRIPTOR, (uint16_t)(LIBUSB_DT_DEVICE << 8u), 0, descriptor, length, 1000);
-}
-
 static int read_device_descriptor(libusb_context* ctx, uint8_t descriptor[USB_DEVICE_DESCRIPTOR_SIZE])
 {
-	return read_device_descriptor_length(ctx, descriptor, USB_DEVICE_DESCRIPTOR_SIZE);
+	return control_transfer(ctx, LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_STANDARD | LIBUSB_RECIPIENT_DEVICE,
+		LIBUSB_REQUEST_GET_DESCRIPTOR, (uint16_t)(LIBUSB_DT_DEVICE << 8u), 0, descriptor, USB_DEVICE_DESCRIPTOR_SIZE,
+		1000);
 }
 
 static int ensure_device_address(libusb_context* ctx)
@@ -415,7 +403,7 @@ static int ensure_device_address(libusb_context* ctx)
 	pio_usb_host_endpoint_close(PICO_LIBUSB_ROOT_INDEX, ctx->device->address, 0x00);
 	ctx->device->address = PICO_LIBUSB_DEVICE_ADDRESS;
 	reset_control_pipe(ctx->device);
-	sleep_ms(PICO_LIBUSB_ADDRESS_SETTLE_MS);
+	sleep_ms(2);
 
 	return open_ep0(ctx, ctx->max_packet0);
 }
@@ -438,27 +426,30 @@ static int enumerate_device(libusb_context* ctx, uint8_t descriptor[USB_DEVICE_D
 		return rc;
 	}
 
-	/*
-	 * Be more like the known-working USBLiter8 host path: after reset, first ask
-	 * for the device descriptor at address 0, learn bMaxPacketSize0, then issue
-	 * SET_ADDRESS.  The old l41ka path did SET_ADDRESS first, which is legal-ish
-	 * for our tiny world but very fragile with laikadfu and marginal Pico2 wiring.
-	 */
+	set_diag(ctx, PICO_LIBUSB_DIAG_SET_ADDRESS, 0, NULL);
+	rc = ensure_device_address(ctx);
+	if (rc < 0)
+	{
+		set_diag(ctx, PICO_LIBUSB_DIAG_SET_ADDRESS, rc, NULL);
+		return rc;
+	}
+
 	memset(descriptor, 0, USB_DEVICE_DESCRIPTOR_SIZE);
-	set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR0, 0, descriptor);
-	int transferred = read_device_descriptor_length(ctx, descriptor, 8);
+	set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, 0, NULL);
+	const int transferred = read_device_descriptor(ctx, descriptor);
 	if (transferred < 0)
 	{
-		set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR0, transferred, descriptor);
+		set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, transferred, descriptor);
 		return transferred;
 	}
-	if (transferred != 8 || descriptor[0] < 8u || descriptor[1] != LIBUSB_DT_DEVICE)
+
+	if (transferred != USB_DEVICE_DESCRIPTOR_SIZE)
 	{
-		set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR0, LIBUSB_ERROR_IO, descriptor);
+		set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, LIBUSB_ERROR_IO, descriptor);
 		return LIBUSB_ERROR_IO;
 	}
 
-	set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR0, LIBUSB_SUCCESS, descriptor);
+	set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, LIBUSB_SUCCESS, descriptor);
 	const uint8_t max_packet0 = descriptor[7] == 0u ? 8u : descriptor[7];
 	if (max_packet0 != ctx->max_packet0)
 	{
@@ -470,35 +461,6 @@ static int enumerate_device(libusb_context* ctx, uint8_t descriptor[USB_DEVICE_D
 			set_diag(ctx, PICO_LIBUSB_DIAG_REOPEN_EP0, rc, descriptor);
 			return rc;
 		}
-	}
-
-	set_diag(ctx, PICO_LIBUSB_DIAG_SET_ADDRESS, 0, descriptor);
-	rc = ensure_device_address(ctx);
-	if (rc < 0)
-	{
-		sleep_ms(PICO_LIBUSB_SET_ADDRESS_RETRY_DELAY_MS);
-		set_diag(ctx, PICO_LIBUSB_DIAG_SET_ADDRESS_RETRY, 0, descriptor);
-		rc = ensure_device_address(ctx);
-	}
-	if (rc < 0)
-	{
-		set_diag(ctx, PICO_LIBUSB_DIAG_SET_ADDRESS_RETRY, rc, descriptor);
-		return rc;
-	}
-
-	memset(descriptor, 0, USB_DEVICE_DESCRIPTOR_SIZE);
-	set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, 0, NULL);
-	transferred = read_device_descriptor(ctx, descriptor);
-	if (transferred < 0)
-	{
-		set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, transferred, descriptor);
-		return transferred;
-	}
-
-	if (transferred != USB_DEVICE_DESCRIPTOR_SIZE)
-	{
-		set_diag(ctx, PICO_LIBUSB_DIAG_READ_DESCRIPTOR, LIBUSB_ERROR_IO, descriptor);
-		return LIBUSB_ERROR_IO;
 	}
 
 	set_diag(ctx, PICO_LIBUSB_DIAG_DONE, LIBUSB_SUCCESS, descriptor);
