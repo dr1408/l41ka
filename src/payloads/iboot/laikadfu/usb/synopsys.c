@@ -181,15 +181,10 @@ void synopsys_initialize(void)
 	write32(gLaikaDFUOffsets.dwc2_base, DOEPINT0, 0x0fu);
 	write32(gLaikaDFUOffsets.dwc2_base, GINTMSK, 0x1000u);
 	write32(gLaikaDFUOffsets.dwc2_base, GINTSTS, 0x1000u);
-
-	/* Give marginal RP2350/Pico2 host wiring time to observe a clean detach/attach. */
-	delay_us(10000);
 	write32(gLaikaDFUOffsets.dwc2_base, DCTL,
 		read32(gLaikaDFUOffsets.dwc2_base, DCTL) & ~2u);
-	delay_us(10000);
 	write32(gLaikaDFUOffsets.usb_phy, 0,
 		read32(gLaikaDFUOffsets.usb_phy, 0) | 2u);
-	delay_us(50000);
 	laikadfu_diag_checkpoint(LAIKADFU_DIAG_POST_CONNECT);
 
 	uint64_t deadline = laikadfu_counter() + LINK_TIMEOUT;
@@ -277,17 +272,18 @@ void synopsys_shutdown(void)
 	delay_us(3000);
 }
 
-void synopsys_ep0_prime_setup(uintptr_t scratch)
+static void ep0_start_setup(uintptr_t scratch)
 {
 	laikadfu_cache_invalidate((const void *)scratch);
 	write32(gLaikaDFUOffsets.dwc2_base, DOEPDMA0, (uint32_t)scratch);
 	write32(gLaikaDFUOffsets.dwc2_base, DOEPTSIZ0, OUT_DMA_SIZE);
 	write32(gLaikaDFUOffsets.dwc2_base, DOEPCTL0,
-		read32(gLaikaDFUOffsets.dwc2_base, DOEPCTL0) | EP_ENABLE_CLEAR_NAK);
+		read32(gLaikaDFUOffsets.dwc2_base, DOEPCTL0) | 0x80000000u);
 }
 
-void synopsys_ep0_wait_setup_primed(uintptr_t scratch)
+void synopsys_ep0_wait_setup(uintptr_t scratch)
 {
+	ep0_start_setup(scratch);
 	uint32_t status;
 	do
 		status = read32(gLaikaDFUOffsets.dwc2_base, DOEPINT0);
@@ -296,12 +292,6 @@ void synopsys_ep0_wait_setup_primed(uintptr_t scratch)
 	delay_us(2);
 	laikadfu_cache_invalidate((const void *)scratch);
 	write32(gLaikaDFUOffsets.dwc2_base, DOEPINT0, status);
-}
-
-void synopsys_ep0_wait_setup(uintptr_t scratch)
-{
-	synopsys_ep0_prime_setup(scratch);
-	synopsys_ep0_wait_setup_primed(scratch);
 }
 
 void synopsys_ep0_send_status(uintptr_t scratch)

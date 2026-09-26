@@ -7,8 +7,6 @@
 void synopsys_initialize(void);
 void synopsys_shutdown(void);
 
-void synopsys_ep0_prime_setup(uintptr_t scratch);
-void synopsys_ep0_wait_setup_primed(uintptr_t scratch);
 void synopsys_ep0_wait_setup(uintptr_t scratch);
 void synopsys_ep0_send_status(uintptr_t scratch);
 void synopsys_ep0_send_data(
