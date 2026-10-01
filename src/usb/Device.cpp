@@ -207,6 +207,16 @@ namespace usb {
 		{
 			ResetUnexpectedDeviceLog();
 			DFUDevice dfu(context, handle);
+			char serial[DFUDevice::MaxSerialLength] {};
+			const int serial_rc = dfu.Serial(serial, sizeof(serial));
+			if (serial_rc >= 0)
+			{
+				L41KA_LOG(logging::Level::Info, "target dfu serial: %s", serial);
+			}
+			else
+			{
+				L41KA_LOG(logging::Level::Warn, "target dfu serial read rc=%d", serial_rc);
+			}
 			if (dfu.IsPwned())
 			{
 				device->storage_ = PwnedDFUDevice(std::move(dfu));
