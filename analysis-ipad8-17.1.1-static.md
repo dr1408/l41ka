@@ -216,3 +216,57 @@ SVCPatcher offset=0x000b9ac0..0x000b9ae0
 ```
 
 Meaning: XR still uses the original strong signatures. iPad8 iBoot-10151.42.2 uses the new iOS17-specific SVC handler signature.
+
+## AES patch target resolved for iPad8 17.1.1
+
+The missing iPad8 AES patch is the same semantic function as XR, but the old patchfinder only found it through an iOS18 caller-side signature. iBoot-10151.42.2 does not have that caller signature, so the AES function itself must be matched directly.
+
+XR 18.7.10 AES function:
+
+```text
+0x19c0881dc: pacibsp
+0x19c0881e0: stp x20, x19, [sp, #-0x20]!
+0x19c0881e4: stp x29, x30, [sp, #0x10]
+0x19c0881e8: add x29, sp, #0x10
+0x19c0881ec: orr w8, w1, w0
+...
+0x19c088204: mov x8, #0x8028
+0x19c088208: movk x8, #0x3b0b, lsl #16
+0x19c08820c: movk x8, #2, lsl #32
+...
+0x19c088218: mov x20, #0x3d2d0000
+0x19c08821c: movk x20, #2, lsl #32
+```
+
+Matching iPad8 17.1.1 AES function:
+
+```text
+0x19c08b3c8: pacibsp
+0x19c08b3cc: stp x20, x19, [sp, #-0x20]!
+0x19c08b3d0: stp x29, x30, [sp, #0x10]
+0x19c08b3d4: add x29, sp, #0x10
+0x19c08b3d8: orr w8, w1, w0
+...
+0x19c08b3f0: mov x8, #0x8028
+0x19c08b3f4: movk x8, #0x3b0b, lsl #16
+0x19c08b3f8: movk x8, #2, lsl #32
+...
+0x19c08b404: mov x20, #0x3d2d0000
+0x19c08b408: movk x20, #2, lsl #32
+```
+
+Patchfinder now matches this function body directly and patches it with `ret`.
+
+Validated outputs:
+
+```text
+iPad8 17.1.1 iBoot/iBEC/iBSS:
+AESPatcher offset=0x0003b3c8 probably-absolute=0x19c08b3c8 bytes=c0035fd6
+SVCPatcher offset=0x000798a8..0x000798c8
+
+XR 18.7.10 iBoot:
+AESPatcher offset=0x000381dc probably-absolute=0x19c0881dc bytes=c0035fd6
+SVCPatcher offset=0x000b9ac0..0x000b9ae0
+```
+
+This means the iPad8 static patchfinder now has all three formerly missing pieces: Stage2, AES, and SVC.

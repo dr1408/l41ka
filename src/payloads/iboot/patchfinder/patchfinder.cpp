@@ -591,17 +591,51 @@ namespace {
 						break;
 					}
 				}
-				if (target != 0)
-				{
-					if (foundCount_ == 0)
-						found_ = target;
-					++foundCount_;
-				}
+				record(target);
 			}
+			matchAesControlFunction(cursor, addr);
 			if (!lastCursor(cursor))
 				return false;
 			found = foundCount_ == 1;
 			return true;
+		}
+
+		bool matchAesControlFunction(const uint32_t* cursor, uintptr_t addr)
+		{
+			if (!contains(base_, addr, 0x60, kCodeSize) || cursor[0] != ARM64_PACIBSP
+				|| cursor[1] != 0xa9be4ff4u
+				|| cursor[2] != 0xa9017bfdu
+				|| cursor[3] != 0x910043fdu
+				|| cursor[4] != 0x2a000028u
+				|| !cmp(cursor[5], cbz_w(8, 0, 0), ~kBranchImm19Mask)
+				|| cursor[6] != and_immediate_w(8, 1, 0, 0)
+				|| cursor[7] != mov_register_x(19, 8)
+				|| cursor[8] != 0x331f0413u
+				|| !cmp(cursor[9], cbz_w(8, 0, 0), ~kBranchImm19Mask)
+				|| cursor[10] != movz_x(8, 0x8028, 0)
+				|| cursor[11] != movk_x(8, 0x3b0b, 16)
+				|| cursor[12] != movk_x(8, 2, 32)
+				|| cursor[13] != str_w(31, 8, 0)
+				|| cursor[14] != str_w(31, 8, 4)
+				|| cursor[15] != movz_x(20, 0x3d2d, 16)
+				|| cursor[16] != movk_x(20, 2, 32)
+				|| cursor[17] != str_w(19, 20, 0)
+				|| !is_bl(cursor[18])
+				|| cursor[19] != ldr_w(8, 20, 0))
+				return false;
+			record(addr);
+			return true;
+		}
+
+		void record(uintptr_t target)
+		{
+			if (target == 0)
+				return;
+			if (found_ == target)
+				return;
+			if (foundCount_ == 0)
+				found_ = target;
+			++foundCount_;
 		}
 
 		bool required() const override { return false; }
