@@ -988,12 +988,9 @@ namespace {
 				resolveReference(addr, instruction);
 			else
 			{
-				if (instruction == ARM64_SVC_7)
-				{
-					++svcInstructionCount_;
-					svcAddress_ = addr;
-				}
+				svcInstructionCount_ += instruction == ARM64_SVC_7 ? 1u : 0u;
 				matchPrimary(cursor, addr);
+				matchIOS17Handler(cursor, addr);
 				if (looksLikeHandler(cursor, addr))
 				{
 					if (fallbackCount_ < 8)
@@ -1051,8 +1048,6 @@ namespace {
 				}
 				resolved_ = fallback_[i];
 			}
-			if (resolved_ == 0 && svcAddress_ != 0)
-				resolved_ = functionStart(base_, svcAddress_);
 		}
 		bool matchPrimary(const uint32_t* cursor, uintptr_t addr)
 		{
@@ -1081,6 +1076,40 @@ namespace {
 					++primaryCount_;
 				}
 			}
+			return true;
+		}
+
+		bool matchIOS17Handler(const uint32_t* cursor, uintptr_t addr)
+		{
+			if (!contains(base_, addr, 0x70, kCodeSize) || cursor[0] != ARM64_PACIBSP
+				|| cursor[1] != sub_x(31, 31, 0x50)
+				|| cursor[2] != stp_x(22, 21, 31, 0x20)
+				|| cursor[3] != stp_x(20, 19, 31, 0x30)
+				|| cursor[4] != stp_x(29, 30, 31, 0x40)
+				|| cursor[5] != add_x(29, 31, 0x40))
+				return false;
+
+			bool capturesInputs = false;
+			bool hasByteGate = false;
+			bool hasConditionalExit = false;
+			for (uint32_t i = 6; i < 28; ++i)
+			{
+				uint32_t instruction = cursor[i];
+				hasByteGate |= cmp(instruction, ldr_b(0, 0, 0), ~(kRtMask | kRnMask | kLoadStoreImm12Mask));
+				hasConditionalExit |= cmp(instruction, b_cond(condition_NotEqual, 0, 0), ~(kConditionMask | kBranchImm19Mask))
+					|| cmp(instruction, b_cond(condition_Equal, 0, 0), ~(kConditionMask | kBranchImm19Mask));
+				if (i + 3 < 28
+					&& cursor[i] == mov_register_x(19, 0)
+					&& cursor[i + 1] == mov_register_x(20, 1)
+					&& cursor[i + 2] == mov_register_x(21, 2)
+					&& cursor[i + 3] == mov_register_x(22, 3))
+					capturesInputs = true;
+			}
+			if (!capturesInputs || !hasByteGate || !hasConditionalExit)
+				return false;
+			if (primaryCount_ == 0)
+				primary_ = addr;
+			++primaryCount_;
 			return true;
 		}
 
@@ -1159,7 +1188,6 @@ namespace {
 
 		uintptr_t payload_;
 		uintptr_t primary_ = 0;
-		uintptr_t svcAddress_ = 0;
 		uint32_t primaryCount_ = 0;
 		uint32_t svcInstructionCount_ = 0;
 		uintptr_t fallback_[8] = {};

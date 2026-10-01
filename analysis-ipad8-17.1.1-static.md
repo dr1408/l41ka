@@ -159,3 +159,60 @@ Stage2Patcher offset=0x0013fbc8
 AESPatcher offset=0x000381dc
 SVCPatcher offset=0x000b9ac0..0x000b9ae0
 ```
+
+## Correction: the unique `svc #7` wrapper is NOT the right SVC patch target
+
+The previous iPad8 attempt used the unique `svc #7` wrapper at file offset `0x580bc` as a fallback SVC target. That was wrong.
+
+Disassembly proves it is only a tiny wrapper/panic path, not the full EL handoff handler that l41ka expects to overwrite:
+
+```text
+0x19c0a80bc: pacibsp
+0x19c0a80c0: stp x29, x30, [sp, #-0x10]!
+0x19c0a80c4: mov x29, sp
+0x19c0a80c8: mov w2, #1
+0x19c0a80cc: svc #7
+0x19c0a80d0: mov x0, #0x843
+...
+```
+
+Patching at `resolved + 0x10` for this function starts at the `svc #7` itself and spills into the next function. That is not equivalent to the XR iOS 18.7.10 target.
+
+## Correct iPad8 iOS 17.1.1 SVC handler candidate
+
+Static analysis found the iOS17-style handler at file offset `0x79898` (`0x19c0c9898` with the harness base). This function has the expected shape for the l41ka SVC patch:
+
+```text
+0x19c0c9898: pacibsp
+0x19c0c989c: sub sp, sp, #0x50
+0x19c0c98a0: stp x22, x21, [sp, #0x20]
+0x19c0c98a4: stp x20, x19, [sp, #0x30]
+0x19c0c98a8: stp x29, x30, [sp, #0x40]
+0x19c0c98ac: add x29, sp, #0x40
+...
+0x19c0c98e8: mov x19, x0
+0x19c0c98ec: mov x20, x1
+0x19c0c98f0: mov x21, x2
+0x19c0c98f4: mov x22, x3
+```
+
+The current patchfinder now matches this iOS17 handler signature directly instead of using the bad `svc #7` fallback.
+
+Validated patch writes for iPad8 17.1.1 now are:
+
+```text
+patchfinder returned 0
+Stage2Patcher offset=0x00000290
+SVCPatcher offset=0x000798a8..0x000798c8
+```
+
+This also validates against the matching iBEC and iBSS files, and XR 18.7.10 remains unchanged:
+
+```text
+XR iBoot-11881.140.96.700.4:
+Stage2Patcher offset=0x0013fbc8
+AESPatcher offset=0x000381dc
+SVCPatcher offset=0x000b9ac0..0x000b9ae0
+```
+
+Meaning: XR still uses the original strong signatures. iPad8 iBoot-10151.42.2 uses the new iOS17-specific SVC handler signature.
