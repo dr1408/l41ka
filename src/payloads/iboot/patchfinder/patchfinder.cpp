@@ -89,6 +89,46 @@ namespace {
 		return true;
 	}
 
+	uintptr_t findBootVersionPadding(uintptr_t base)
+	{
+		for (uintptr_t offset = 0; offset < kCodeSize; ++offset)
+		{
+			uintptr_t addr = base + offset;
+			if (!contains(base, addr, 64, kCodeSize))
+				break;
+			const auto* name = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(addr));
+			if (name[0] != static_cast<uint8_t>('i') && name[0] != static_cast<uint8_t>('m'))
+				continue;
+			bool valid = true;
+			uintptr_t i = 0;
+			for (; i < sizeof(kBootVersion) - 1; ++i)
+				valid = valid && name[i + 1] == kBootVersion[i];
+			if (!valid)
+				continue;
+			++i;
+			for (; i < 32; ++i)
+			{
+				uint8_t value = name[i];
+				if (value == 0)
+					break;
+				if ((value < static_cast<uint8_t>('0') || value > static_cast<uint8_t>('9'))
+					&& value != static_cast<uint8_t>('.'))
+				{
+					valid = false;
+					break;
+				}
+			}
+			if (!valid || i >= 32 || name[i] != 0 || !contains(base, addr + i, sizeof(kStage2Loader), kCodeSize))
+				continue;
+			bool empty = true;
+			for (uintptr_t available = 0; available < sizeof(kStage2Loader); ++available)
+				empty = empty && name[i + available] == 0;
+			if (empty)
+				return addr + i;
+		}
+		return 0;
+	}
+
 	uintptr_t functionStart(uintptr_t base, uintptr_t address)
 	{
 		uintptr_t limit = address > base + 0x80 ? address - 0x80 : base;
@@ -479,6 +519,8 @@ namespace {
 			}
 			if (!lastCursor(cursor))
 				return false;
+			if (address_ == 0)
+				address_ = findBootVersionPadding(base_);
 			found = address_ != 0;
 			return true;
 		}
@@ -562,7 +604,13 @@ namespace {
 			return true;
 		}
 
-		void Patch() override { patch32(found_, ARM64_RET); }
+		bool required() const override { return false; }
+
+		void Patch() override
+		{
+			if (found_ != 0)
+				patch32(found_, ARM64_RET);
+		}
 
 	private:
 		uintptr_t found_ = 0;
@@ -940,7 +988,11 @@ namespace {
 				resolveReference(addr, instruction);
 			else
 			{
-				svcInstructionCount_ += instruction == ARM64_SVC_7 ? 1u : 0u;
+				if (instruction == ARM64_SVC_7)
+				{
+					++svcInstructionCount_;
+					svcAddress_ = addr;
+				}
 				matchPrimary(cursor, addr);
 				if (looksLikeHandler(cursor, addr))
 				{
@@ -999,6 +1051,8 @@ namespace {
 				}
 				resolved_ = fallback_[i];
 			}
+			if (resolved_ == 0 && svcAddress_ != 0)
+				resolved_ = functionStart(base_, svcAddress_);
 		}
 		bool matchPrimary(const uint32_t* cursor, uintptr_t addr)
 		{
@@ -1105,6 +1159,7 @@ namespace {
 
 		uintptr_t payload_;
 		uintptr_t primary_ = 0;
+		uintptr_t svcAddress_ = 0;
 		uint32_t primaryCount_ = 0;
 		uint32_t svcInstructionCount_ = 0;
 		uintptr_t fallback_[8] = {};
