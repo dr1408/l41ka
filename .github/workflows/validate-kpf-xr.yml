@@ -37,7 +37,7 @@ jobs:
           url="$(ipsw download ipsw --device iPhone11,8 --version 18.7.10 --urls | awk 'NF { print $NF; exit }')"
           test -n "$url"
           ipsw info --remote "$url" | tee artifacts/kernel/ipsw-info.txt
-          ipsw extract --kernel --remote --confirm -o artifacts/kernel "$url"
+          ipsw extract --remote --kernel -o artifacts/kernel "$url"
           kernel="$(find artifacts/kernel -type f -name 'kernelcache*' -print -quit)"
           test -n "$kernel"
           test -s "$kernel"
