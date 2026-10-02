@@ -62,8 +62,6 @@ set(L41KA_PAYLOAD_VMACHO vmacho CACHE STRING "vmacho executable used to extract 
 set(L41KA_PAYLOAD_XXD xxd CACHE STRING "xxd executable used to generate payload headers")
 set(L41KA_PONGOOS_MAKE make CACHE STRING "Make executable used to build PongoOS")
 set(L41KA_RAMDISK_IMAGE "${CMAKE_CURRENT_LIST_DIR}/ramdisks/ramdisk.dmg" CACHE FILEPATH "Ramdisk image embedded in the Pi firmware")
-set(L41KA_RAMDISK_COMPRESSED_IMAGE "" CACHE FILEPATH "Pre-compressed LZMA ramdisk image")
-set(L41KA_RAMDISK_UNCOMPRESSED_SIZE_OVERRIDE 0 CACHE STRING "Uncompressed size for a pre-compressed ramdisk")
 set(L41KA_RAMDISK_XZ xz CACHE STRING "xz executable used to compress the embedded ramdisk")
 set(L41KA_PONGOOS_EMBEDDED_CFLAGS "" CACHE STRING "Extra CFLAGS passed to the PongoOS build")
 set(L41KA_PONGOOS_COMPAT_CFLAGS
@@ -504,19 +502,6 @@ if(EXISTS "${L41KA_RAMDISK_IMAGE}")
             -P ${CMAKE_CURRENT_LIST_DIR}/cmake/CompressLzma.cmake
         DEPENDS ${L41KA_RAMDISK_IMAGE} ${CMAKE_CURRENT_LIST_DIR}/cmake/CompressLzma.cmake
         COMMENT "Compressing embedded ramdisk"
-        VERBATIM
-    )
-elseif(EXISTS "${L41KA_RAMDISK_COMPRESSED_IMAGE}")
-    if(L41KA_RAMDISK_UNCOMPRESSED_SIZE_OVERRIDE LESS 1)
-        message(FATAL_ERROR "L41KA_RAMDISK_UNCOMPRESSED_SIZE_OVERRIDE is required with a pre-compressed ramdisk")
-    endif()
-    set(L41KA_RAMDISK_UNCOMPRESSED_SIZE ${L41KA_RAMDISK_UNCOMPRESSED_SIZE_OVERRIDE})
-    add_custom_command(
-        OUTPUT ${L41KA_RAMDISK_COMPRESSED}
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${L41KA_RAMDISK_COMPRESSED_IMAGE} ${L41KA_RAMDISK_COMPRESSED}
-        DEPENDS ${L41KA_RAMDISK_COMPRESSED_IMAGE}
-        COMMENT "Copying pre-compressed embedded ramdisk"
         VERBATIM
     )
 else()
