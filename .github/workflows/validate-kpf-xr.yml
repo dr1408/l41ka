@@ -36,9 +36,13 @@ jobs:
           mkdir -p artifacts/kernel
           url="$(ipsw download ipsw --device iPhone11,8 --version 18.7.10 --urls | awk 'NF { print $NF; exit }')"
           test -n "$url"
+          ipsw info --remote "$url" | tee artifacts/kernel/ipsw-info.txt
           ipsw extract --kernel --remote --confirm -o artifacts/kernel "$url"
           kernel="$(find artifacts/kernel -type f -name 'kernelcache*' -print -quit)"
           test -n "$kernel"
+          test -s "$kernel"
+          ipsw kernel version "$kernel" | tee artifacts/kernel/kernel-version.txt
+          grep -Eq 'Darwin: 24\.6\.0|11417\.140\.69\.706\.66' artifacts/kernel/kernel-version.txt
           printf 'KERNEL=%s\n' "$GITHUB_WORKSPACE/$kernel" >> "$GITHUB_ENV"
 
       - name: Build KPF validator
