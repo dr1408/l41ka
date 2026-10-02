@@ -1,0 +1,61 @@
+name: Validate KPF on XR 18.7.10
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate XR KPF patch set
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          lfs: true
+
+      - name: Install ipsw
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew tap blacktop/tap
+          brew trust blacktop/tap
+          brew install --formula blacktop/tap/ipsw
+          ipsw version
+
+      - name: Extract XR 18.7.10 kernelcache
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/kernel
+          url="$(ipsw download ipsw --device iPhone11,8 --version 18.7.10 --urls | awk 'NF { print $NF; exit }')"
+          test -n "$url"
+          ipsw extract --kernel --remote --confirm -o artifacts/kernel "$url"
+          kernel="$(find artifacts/kernel -type f -name 'kernelcache*' -print -quit)"
+          test -n "$kernel"
+          printf 'KERNEL=%s\n' "$GITHUB_WORKSPACE/$kernel" >> "$GITHUB_ENV"
+
+      - name: Build KPF validator
+        shell: bash
+        working-directory: src/payloads/PongoOS/checkra1n/kpf-test
+        run: make kpf-test.macos
+
+      - name: Run KPF validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          src/payloads/PongoOS/checkra1n/kpf-test/kpf-test.macos -n "$KERNEL" 2>&1 | tee report/kpf-xr-18.7.10.txt
+
+      - name: Upload validation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpf-xr-18.7.10-report
+          path: report/kpf-xr-18.7.10.txt
+          if-no-files-found: error

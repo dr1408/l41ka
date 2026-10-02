@@ -2,6 +2,7 @@ name: Build firmware
 
 on:
   push:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,6 +27,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          lfs: true
 
       - name: Cache toolchain archive
         uses: actions/cache@v4
@@ -64,6 +66,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cat ramdisks/xr18.7-ramdisk.part-* > ramdisks/ramdisk.dmg.lzma
           cmake -S . -B build -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
               -DPICO_BOARD=pico2 \
@@ -71,7 +74,10 @@ jobs:
               "-DL41KA_PAYLOAD_CLANG=$PAYLOAD_CLANG" \
               "-DL41KA_PAYLOAD_VMACHO=$VMACHO" \
               "-DL41KA_PAYLOAD_XXD=$XXD" \
-              "-DL41KA_PONGOOS_MAKE=$PONGO_MAKE"
+              "-DL41KA_PONGOOS_MAKE=$PONGO_MAKE" \
+              "-DL41KA_RAMDISK_IMAGE=$GITHUB_WORKSPACE/ramdisks/missing.dmg" \
+              "-DL41KA_RAMDISK_COMPRESSED_IMAGE=$GITHUB_WORKSPACE/ramdisks/ramdisk.dmg.lzma" \
+              -DL41KA_RAMDISK_UNCOMPRESSED_SIZE_OVERRIDE=220200960
 
       - name: Build
         shell: bash
