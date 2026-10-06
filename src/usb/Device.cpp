@@ -6,6 +6,7 @@
 
 #include "usb/libusb.h"
 #include "usb/pico_libusb.h"
+#include "../../include/control/Log.h"
 
 namespace usb {
 	namespace {
@@ -121,10 +122,12 @@ namespace usb {
 		{
 			return open_rc;
 		}
+		L41KA_LOG(logging::Level::Info, "target candidate vid=%04x pid=%04x", vendor_id, product_id);
 		if (vendor_id != AppleVendorId
 			|| (product_id != DFUProductId && product_id != RecoveryProductId && product_id != PongoProductId
 				&& product_id != LaikaDFUProductId))
 		{
+			L41KA_LOG(logging::Level::Warn, "target unexpected vid=%04x pid=%04x", vendor_id, product_id);
 			libusb_close(handle);
 			return LIBUSB_ERROR_NOT_FOUND;
 		}

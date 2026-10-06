@@ -125,6 +125,59 @@ namespace control {
 			}
 		}
 
+		void PublishConnection(const usb::Device& device);
+
+		bool WaitForTarget(usb::Device& device, DeviceType wanted, uint32_t timeout_ms, const char* label)
+		{
+			L41KA_LOG(logging::Level::Info, "wait-%s wait begin timeout=%u want=%s", label, timeout_ms,
+				DeviceTypeName(wanted));
+			const uint32_t start_ms = to_ms_since_boot(get_absolute_time());
+			for (;;)
+			{
+				const uint32_t elapsed = to_ms_since_boot(get_absolute_time()) - start_ms;
+				if (elapsed >= timeout_ms)
+				{
+					L41KA_LOG(logging::Level::Warn, "wait-%s timeout last=%s connected=%u", label,
+						DeviceTypeName(GetDeviceType(device)), usb::Device::IsConnected() ? 1u : 0u);
+					device.Close();
+					PublishConnection(device);
+					return false;
+				}
+
+				if (device.IsOpen() && !usb::Device::IsConnected())
+				{
+					device.Close();
+					PublishConnection(device);
+				}
+
+				if (!device.IsOpen() && usb::Device::IsConnected())
+				{
+					const int rc = usb::Device::Open(&device);
+					if (rc != LIBUSB_SUCCESS)
+					{
+						L41KA_LOG(logging::Level::Warn, "wait-%s open rc=%d", label, rc);
+						device.Close();
+					}
+					else
+					{
+						PublishConnection(device);
+						const DeviceType type = GetDeviceType(device);
+						L41KA_LOG(logging::Level::Info, "wait-%s poll %ums connected=%u type=%s", label,
+							to_ms_since_boot(get_absolute_time()) - start_ms,
+							usb::Device::IsConnected() ? 1u : 0u, DeviceTypeName(type));
+						if (type == wanted)
+						{
+							L41KA_LOG(logging::Level::Info, "wait-%s ok after=%ums", label,
+								to_ms_since_boot(get_absolute_time()) - start_ms);
+							return true;
+						}
+					}
+				}
+
+				sleep_ms(500);
+			}
+		}
+
 		void PublishConnection(const usb::Device& device)
 		{
 			const DeviceType type = GetDeviceType(device);
@@ -660,6 +713,7 @@ namespace control {
 					static_cast<uint32_t>(rc));
 			device.Close();
 			PublishConnection(device);
+			WaitForTarget(device, DeviceType::LaikaDfu, 30000u, "laikadfu");
 		}
 
 		void PongoSendCommand(const TargetCommand& command, usb::Device& device)
