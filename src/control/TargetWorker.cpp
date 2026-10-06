@@ -196,6 +196,7 @@ namespace control {
 			const int rc = usb::Device::Open(&device);
 			if (rc != LIBUSB_SUCCESS)
 			{
+				L41KA_LOG(logging::Level::Warn, "target open failed rc=%d", rc);
 				// A target can disappear or still be enumerating while this probe resets EP0.
 				// Treat that as an empty sample; a later probe can retry without rebooting the Pi.
 				device.Close();
@@ -215,13 +216,14 @@ namespace control {
 			const USBLiter8::Result result = USBLiter8::Run(*device.AsDFU());
 			if (result.usb_code != LIBUSB_SUCCESS)
 			{
-				L41KA_LOG(logging::Level::Fatal, "dfu exploit failed in %s, l41ka will reset now.", result.error_message);
+				L41KA_LOG(logging::Level::Fatal, "dfu exploit failed in %s rc=%d, l41ka will reset now.",
+					result.error_message, result.usb_code);
 				PanicTarget(FaultReason::ExploitFailed, command.request_id, command.opcode,
 					static_cast<uint32_t>(result.usb_code));
 			}
 			device.Close();
 			PublishConnection(device);
-			L41KA_LOG(logging::Level::Info, "dfu exploit completed");
+			L41KA_LOG(logging::Level::Info, "dfu exploit completed; waiting for pwned-dfu");
 		}
 
 		void DfuRawEp0(const TargetCommand& command, usb::Device& device)
@@ -499,6 +501,8 @@ namespace control {
 		{
 			if (!device.IsOpen() || !device.IsLaikaDFU())
 				PanicTarget(FaultReason::TargetStateChanged, command.request_id, command.opcode);
+			L41KA_LOG(logging::Level::Info, "laikadfu send embedded pongo begin bytes=%u",
+				static_cast<unsigned int>(pongo_payload_len));
 			SendStatus(command, Status::Success);
 			const int rc = device.AsLaikaDFU()->SendBuffer(pongo_payload, pongo_payload_len);
 			if (rc < 0)
@@ -506,6 +510,7 @@ namespace control {
 					static_cast<uint32_t>(rc));
 			device.Close();
 			PublishConnection(device);
+			L41KA_LOG(logging::Level::Info, "laikadfu send embedded pongo complete rc=%d", rc);
 		}
 
 		void TriggerPongo(const TargetCommand& command, usb::Device& device)
@@ -643,10 +648,13 @@ namespace control {
 		{
 			if (!device.IsOpen() || !device.IsPwnedDFU())
 				PanicTarget(FaultReason::TargetStateChanged, command.request_id, command.opcode);
+			L41KA_LOG(logging::Level::Info, "setup-iboot embedded begin");
 			SendStatus(command, Status::Success);
 			int rc = iBootPatcherSetup::Run(*device.AsPwnedDFU());
+			L41KA_LOG(logging::Level::Info, "setup-iboot embedded run rc=%d", rc);
 			if (rc == LIBUSB_SUCCESS)
 				rc = device.AsPwnedDFU()->Abort();
+			L41KA_LOG(logging::Level::Info, "setup-iboot embedded dfu-abort rc=%d", rc);
 			if (rc != LIBUSB_SUCCESS)
 				PanicTarget(FaultReason::TargetUsbFailure, command.request_id, command.opcode,
 					static_cast<uint32_t>(rc));
