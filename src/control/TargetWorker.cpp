@@ -277,6 +277,7 @@ namespace control {
 			device.Close();
 			PublishConnection(device);
 			L41KA_LOG(logging::Level::Info, "dfu exploit completed; waiting for pwned-dfu");
+			WaitForTarget(device, DeviceType::PwnedDfu, 30000u, "pwneddfu");
 		}
 
 		void DfuRawEp0(const TargetCommand& command, usb::Device& device)
