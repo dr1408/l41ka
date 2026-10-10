@@ -1,14 +1,22 @@
 name: Build firmware
 
 on:
-  push:
   workflow_dispatch:
+    inputs:
+      pongoos_branch:
+        description: PongoOS branch to build against
+        required: true
+        default: t8030
+        type: choice
+        options:
+          - t8030
+          - test
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.ref }}
+  group: build-${{ github.workflow }}-${{ github.ref }}-${{ inputs.pongoos_branch }}
   cancel-in-progress: true
 
 env:
@@ -17,7 +25,7 @@ env:
 
 jobs:
   build:
-    name: Build pico2
+    name: Build pico2 (PongoOS ${{ inputs.pongoos_branch }})
     runs-on: macos-15
     timeout-minutes: 60
 
@@ -27,6 +35,20 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Override PongoOS submodule to selected branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="${{ inputs.pongoos_branch }}"
+          echo "selected PongoOS branch: $BRANCH"
+          cd src/payloads/PongoOS
+          echo "before override:"
+          git log --oneline -1
+          git fetch origin "$BRANCH" --depth=100
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+          echo "after override:"
+          git log --oneline -1
 
       - name: Cache toolchain archive
         uses: actions/cache@v4
@@ -81,7 +103,7 @@ jobs:
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: l41ka-pico2
+          name: l41ka-pico2-pongoos-${{ inputs.pongoos_branch }}
           path: build/l41ka.*
           if-no-files-found: error
           retention-days: 14
