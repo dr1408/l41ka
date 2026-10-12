@@ -190,14 +190,8 @@ namespace {
 		device.Write(writableCopyAdjusted(0x1000058a0), &movx0xzr, 4);
 		// device.Write(writableCopyAdjusted(0x10000589c), &spin, 4);
 
-		// demote
-		const uint32_t b28 = aarch64::assemble_b(0, 0x28);
-		rc = device.Write(writableCopyAdjusted(0x100007c20), &b28, 4); // yes we are secure mr iboot
-		rc |= device.Exec(0x100007cf8, nullptr, 0, nullptr); // uncomment to demote before leaving DFU
-		if (rc != LIBUSB_SUCCESS)
-		{
-			return rc;
-		}
+		// Do not demote the device before leaving DFU. The branch patch and
+		// explicit iBoot execution below were the demotion path; keep both off.
 
 		return device.SetBootLR(0x100000000);
 	}
